@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- v4.0 splash logo: glowing violet shield with a check, drawn as vector. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="120dp" android:height="120dp"
+    android:viewportWidth="120" android:viewportHeight="120">
+
+    <!-- soft outer glow plate -->
+    <path android:pathData="M60,8 L102,24 V60 C102,86 84,104 60,114 C36,104 18,86 18,60 V24 Z"
+        android:fillColor="#338A3FFC" />
+
+    <!-- shield body gradient -->
+    <path android:pathData="M60,16 L94,29 V60 C94,82 79,97 60,106 C41,97 26,82 26,60 V29 Z">
+        <aapt:attr xmlns:aapt="http://schemas.android.com/aapt" name="android:fillColor">
+            <gradient android:type="linear"
+                android:startX="26" android:startY="16" android:endX="94" android:endY="106"
+                android:startColor="#FF8A3FFC" android:endColor="#FF4C2896" />
+        </aapt:attr>
+    </path>
+
+    <!-- shield border -->
+    <path android:pathData="M60,16 L94,29 V60 C94,82 79,97 60,106 C41,97 26,82 26,60 V29 Z"
+        android:strokeColor="#FFB983FF" android:strokeWidth="2" android:fillColor="#00000000" />
+
+    <!-- check mark -->
+    <path android:pathData="M45,60 L55,71 L77,46"
+        android:strokeColor="#FFFFFFFF" android:strokeWidth="6"
+        android:strokeLineCap="round" android:strokeLineJoin="round"
+        android:fillColor="#00000000" />
+</vector>

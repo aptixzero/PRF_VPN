@@ -17,6 +17,7 @@ import androidx.lifecycle.repeatOnLifecycle
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import com.neonvpn.app.R
+import com.neonvpn.app.config.AutoTestEngine
 import com.neonvpn.app.config.ConfigParser
 import com.neonvpn.app.config.ConfigStore
 import com.neonvpn.app.config.FreeConfigSource
@@ -30,26 +31,23 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
 /**
- * v3.8 "Free Configs" tab — rebuilt around [FreeConfigSource] (prfgame/CC_new).
+ * v4.0 "Free Configs" tab — rebuilt around [FreeConfigSource] (aptixzero/con_new)
+ * and the new [AutoTestEngine].
  *
- * Auto Search / Auto Test are GONE. The tab now exposes exactly four actions:
- *
- *   • SEARCH FREE CONFIGS  → pulls the NEXT 120 unique vless/vmess configs from
- *                            the CC_new feed and APPENDS them to the list. A fresh
- *                            install starts at catalog cursor 0; each press
- *                            continues from where the device left off, walking the
- *                            files in order and wrapping after the last one.
- *                            Configs are renamed "Server N" globally. The loading
- *                            bar fills with the real running count and the UI
- *                            never freezes (work is on IO, streamed in chunks).
- *   • PING ALL             → real, time-boxed proxied ping for every config;
- *                            results re-sort (fast up, dead down) and persist.
- *   • SELECT               → toggles multi-select; reveals Select All / Copy /
- *                            Delete for the checked items.
- *   • DELETE ALL           → clears the whole free list.
- *
- *   • per row              → copy / delete / ping a single config, or tap to save
- *                            it into My Configs and select it.
+ * Actions (matching the UI sheet):
+ *   • START SEARCH  → pulls the NEXT 120 unique vless/vmess configs and APPENDS
+ *                     them to the list (renamed "Server N"). Acts as STOP while a
+ *                     manual search is in flight.
+ *   • PING ALL      → real, color-coded proxied ping of every config; results
+ *                     re-sort (fast up, dead down) and persist.
+ *   • AUTO TEST     → starts the continuous engine: it auto-searches, auto-pings,
+ *                     moves the WORKING ones into My Configs live, drops the dead
+ *                     ones, wipes + re-searches, and loops forever. The button
+ *                     becomes a CANCEL button while running.
+ *   • DELETE ALL    → clears the whole free list.
+ *   • SELECT        → multi-select toolbar (Select All / Copy / Delete).
+ *   • per row       → copy / delete / ping a single config, or tap to save it
+ *                     into My Configs and select it.
  */
 class FreeConfigsFragment : Fragment() {
 
@@ -57,8 +55,10 @@ class FreeConfigsFragment : Fragment() {
     private lateinit var myStore: ConfigStore
     private lateinit var adapter: ServerAdapter
 
-    private lateinit var btnSearch: TextView
+    private lateinit var btnSearch: View
+    private lateinit var btnSearchLabel: TextView
     private lateinit var btnPingAll: TextView
+    private lateinit var btnAutoTest: TextView
     private lateinit var btnSelect: TextView
     private lateinit var btnDeleteAll: TextView
     private lateinit var selectBar: View
@@ -69,6 +69,7 @@ class FreeConfigsFragment : Fragment() {
     private lateinit var progressBar: ProgressBar
     private lateinit var progressLabel: TextView
     private lateinit var emptyView: View
+    private lateinit var listHeader: TextView
 
     private var job: Job? = null
     @Volatile private var busy = false
@@ -85,7 +86,9 @@ class FreeConfigsFragment : Fragment() {
         myStore = ConfigStore(requireContext())
 
         btnSearch = view.findViewById(R.id.btn_search)
+        btnSearchLabel = view.findViewById(R.id.btn_search_label)
         btnPingAll = view.findViewById(R.id.btn_ping_all)
+        btnAutoTest = view.findViewById(R.id.btn_auto_test)
         btnSelect = view.findViewById(R.id.btn_select)
         btnDeleteAll = view.findViewById(R.id.btn_delete_all)
         selectBar = view.findViewById(R.id.select_bar)
@@ -96,6 +99,7 @@ class FreeConfigsFragment : Fragment() {
         progressBar = view.findViewById(R.id.search_progress)
         progressLabel = view.findViewById(R.id.progress_label)
         emptyView = view.findViewById(R.id.empty_view)
+        listHeader = view.findViewById(R.id.list_header)
 
         val recycler = view.findViewById<RecyclerView>(R.id.recycler)
         recycler.layoutManager = LinearLayoutManager(requireContext())
@@ -111,17 +115,16 @@ class FreeConfigsFragment : Fragment() {
         )
         recycler.adapter = adapter
 
-        // seed the dedup set from whatever is already stored
         seenKeys.clear()
         initial.forEach { seenKeys.add(ConfigParser.dedupKey(it)) }
 
-        // v3.8 §4.4 — hydrate the app-scoped PingService and observe its single
-        // StateFlow so free-tab pings survive tab switches and persist on disk.
         PingService.hydrate(requireContext(), PingStore.FREE)
         observePingStatuses()
+        observeAutoTest()
 
         btnSearch.setOnClickListener { onSearchClicked() }
         btnPingAll.setOnClickListener { pingAll() }
+        btnAutoTest.setOnClickListener { onAutoTestClicked() }
         btnSelect.setOnClickListener { toggleSelectMode() }
         btnDeleteAll.setOnClickListener { deleteAll() }
         btnSelectAll.setOnClickListener { selectAllToggle() }
@@ -129,10 +132,8 @@ class FreeConfigsFragment : Fragment() {
         btnDeleteSel.setOnClickListener { deleteSelected() }
 
         refreshEmpty()
+        updateListHeader()
 
-        // Make sure the rotation pointer is valid (fresh install -> file 0,
-        // repo update -> reset to file 0). Done in the background so it never
-        // blocks the first frame.
         viewLifecycleOwner.lifecycleScope.launch(Dispatchers.IO) {
             try { FreeConfigSource.ensureFreshState(requireContext()) } catch (_: Throwable) {}
         }
@@ -141,6 +142,8 @@ class FreeConfigsFragment : Fragment() {
     override fun onDestroyView() {
         super.onDestroyView()
         job?.cancel()
+        // NOTE: do NOT stop AutoTestEngine here — it is app-scoped and must keep
+        // running across tab switches until the user explicitly cancels it.
     }
 
     /** Render live ping statuses from the app-scoped PingService (§4.4). */
@@ -149,48 +152,77 @@ class FreeConfigsFragment : Fragment() {
             viewLifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {
                 PingService.statuses.collect { map ->
                     adapter.applyStatuses(map)
-                    // Mirror the (re-sorted) order back to disk so it persists.
                     if (adapter.items.isNotEmpty()) freeStore.replaceAll(adapter.items)
                 }
             }
         }
     }
 
+    /** v4.0 — reflect the continuous Auto-Test engine's progress in the UI. */
+    private fun observeAutoTest() {
+        viewLifecycleOwner.lifecycleScope.launch {
+            viewLifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {
+                AutoTestEngine.progress.collect { p ->
+                    if (p.running) {
+                        btnAutoTest.text = getString(R.string.autotest_cancel)
+                        showProgress(
+                            if (p.batchSize > 0) (p.testedInBatch * 100 / p.batchSize) else 0,
+                            "${p.phase} · ${p.workingFound} working → My Configs"
+                        )
+                        // The engine appended fresh configs to the free store on disk;
+                        // reload them so the user sees the list churn live.
+                        reloadFromStore()
+                    } else {
+                        if (btnAutoTest.text == getString(R.string.autotest_cancel)) {
+                            btnAutoTest.text = getString(R.string.auto_test)
+                            hideProgressDelayed()
+                            reloadFromStore()
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private fun reloadFromStore() {
+        val fresh = freeStore.get()
+        adapter.items = fresh
+        seenKeys.clear()
+        fresh.forEach { seenKeys.add(ConfigParser.dedupKey(it)) }
+        adapter.applyStatuses(PingService.statuses.value)
+        refreshEmpty()
+        updateListHeader()
+    }
+
     // --------------------------------------------------------------- search
     private fun onSearchClicked() {
-        if (busy) { // acts as STOP
+        if (AutoTestEngine.isRunning) { toast(getString(R.string.autotest_running)); return }
+        if (busy) {
             job?.cancel()
             setBusy(false)
-            btnSearch.text = getString(R.string.search_free_configs)
+            btnSearchLabel.text = getString(R.string.start_search)
             hideProgressDelayed()
             return
         }
         startSearch()
     }
 
-    /**
-     * Pull the NEXT 100 configs and APPEND them (never wipes the existing list).
-     */
     private fun startSearch() {
-        if (adapter.selectMode) toggleSelectMode()   // leave select mode while searching
+        if (adapter.selectMode) toggleSelectMode()
         setBusy(true)
-        btnSearch.text = getString(R.string.searching)
+        btnSearchLabel.text = getString(R.string.searching)
         showProgress(0, getString(R.string.searching))
 
         job = viewLifecycleOwner.lifecycleScope.launch {
-            // make sure rotation state is sane before we pull
             try { FreeConfigSource.ensureFreshState(requireContext()) } catch (_: Throwable) {}
 
-            val startIndex = adapter.items.size   // continue "Server N" numbering
             val batch = FreeConfigSource.nextBatch(
                 ctx = requireContext(),
-                startIndex = startIndex,
+                startIndex = adapter.items.size,
                 seenKeys = seenKeys
             ) { added, target, status ->
                 val pct = if (target > 0) (added * 100 / target) else 0
-                activity?.runOnUiThread {
-                    if (isAdded) showProgress(pct, status)
-                }
+                activity?.runOnUiThread { if (isAdded) showProgress(pct, status) }
             }
             if (!isActive || !isAdded) return@launch
 
@@ -199,36 +231,48 @@ class FreeConfigsFragment : Fragment() {
                 freeStore.replaceAll(adapter.items)
                 adapter.notifyDataSetChanged()
                 refreshEmpty()
+                updateListHeader()
             }
 
             showProgress(
                 100,
                 when {
-                    // Nothing scanned at all → every mirror (and the disk cache)
-                    // was unreachable: surface the offline message + cached note.
                     batch.configs.isEmpty() && batch.foundRaw == 0 ->
                         getString(R.string.feed_unreachable_offline)
-                    batch.configs.isEmpty() ->
-                        getString(R.string.search_none)
-                    else ->
-                        getString(R.string.search_done, batch.configs.size)
+                    batch.configs.isEmpty() -> getString(R.string.search_none)
+                    else -> getString(R.string.search_done, batch.configs.size)
                 }
             )
             if (batch.configs.isEmpty() && batch.foundRaw == 0) {
                 toast(getString(R.string.feed_unreachable_offline))
             }
             setBusy(false)
-            btnSearch.text = getString(R.string.search_free_configs)
+            btnSearchLabel.text = getString(R.string.start_search)
             hideProgressDelayed()
         }
     }
 
+    // ------------------------------------------------------------ auto test
+    /** v4.0 — toggle the continuous Auto-Test engine (START ⇄ CANCEL). */
+    private fun onAutoTestClicked() {
+        if (AutoTestEngine.isRunning) {
+            AutoTestEngine.stop()
+            btnAutoTest.text = getString(R.string.auto_test)
+            hideProgressDelayed()
+            toast(getString(R.string.autotest_stop))
+            return
+        }
+        if (busy) { job?.cancel(); setBusy(false); btnSearchLabel.text = getString(R.string.start_search) }
+        if (adapter.selectMode) toggleSelectMode()
+        AutoTestEngine.start(requireContext())
+        btnAutoTest.text = getString(R.string.autotest_cancel)
+        showProgress(0, getString(R.string.autotest_collecting))
+        toast(getString(R.string.autotest_running))
+    }
+
     // ------------------------------------------------------------- ping all
-    // §4.4 — delegate the sweep to the app-scoped PingService. The StateFlow
-    // observer re-sorts + persists; here we just drive the progress UI and a
-    // single watcher coroutine that ends when the sweep finishes.
     private fun pingAll() {
-        if (busy) return
+        if (busy || AutoTestEngine.isRunning) return
         if (adapter.items.isEmpty()) { toast(getString(R.string.free_empty)); return }
 
         val started = PingService.pingAll(requireContext(), adapter.items.toList(), PingStore.FREE)
@@ -238,7 +282,6 @@ class FreeConfigsFragment : Fragment() {
         val total = adapter.items.size
         showProgress(0, getString(R.string.testing_ping))
         job = viewLifecycleOwner.lifecycleScope.launch {
-            // Poll the flow for completion so we can show a running tested count.
             while (isActive && isAdded) {
                 val map = PingService.statuses.value
                 val done = adapter.items.count {
@@ -289,12 +332,12 @@ class FreeConfigsFragment : Fragment() {
         val ids = adapter.checked.toSet()
         if (ids.isEmpty()) { toast(getString(R.string.free_empty)); return }
         adapter.items.removeAll { it.id in ids }
-        // also drop their dedup keys so they can be re-fetched later
         rebuildSeenKeys()
         adapter.checked.clear()
         freeStore.replaceAll(adapter.items)
         adapter.notifyDataSetChanged()
         refreshEmpty()
+        updateListHeader()
         toast(getString(R.string.deleted_all))
     }
 
@@ -322,6 +365,7 @@ class FreeConfigsFragment : Fragment() {
         adapter.notifyDataSetChanged()
         freeStore.replaceAll(adapter.items)
         refreshEmpty()
+        updateListHeader()
     }
 
     private fun copyOne(cfg: ServerConfig) {
@@ -330,7 +374,6 @@ class FreeConfigsFragment : Fragment() {
         toast(getString(R.string.copy_one))
     }
 
-    /** Tapping a free config saves it into My Configs and selects it. */
     private fun saveToMyConfigs(cfg: ServerConfig) {
         myStore.addServers(listOf(cfg))
         val stored = myStore.getServers().firstOrNull { it.rawLink == cfg.rawLink }
@@ -342,6 +385,7 @@ class FreeConfigsFragment : Fragment() {
 
     private fun deleteAll() {
         if (busy) return
+        if (AutoTestEngine.isRunning) AutoTestEngine.stop()
         if (adapter.selectMode) toggleSelectMode()
         freeStore.clear()
         adapter.items = mutableListOf()
@@ -349,6 +393,8 @@ class FreeConfigsFragment : Fragment() {
         PingService.clear(requireContext(), PingStore.FREE)
         adapter.notifyDataSetChanged()
         refreshEmpty()
+        updateListHeader()
+        btnAutoTest.text = getString(R.string.auto_test)
         toast(getString(R.string.deleted_all))
     }
 
@@ -371,7 +417,7 @@ class FreeConfigsFragment : Fragment() {
 
     private fun hideProgressDelayed() {
         progressBox.postDelayed({
-            if (isAdded && !busy) progressBox.visibility = View.GONE
+            if (isAdded && !busy && !AutoTestEngine.isRunning) progressBox.visibility = View.GONE
         }, 1500)
     }
 
@@ -379,8 +425,11 @@ class FreeConfigsFragment : Fragment() {
         emptyView.visibility = if (adapter.items.isEmpty()) View.VISIBLE else View.GONE
     }
 
+    private fun updateListHeader() {
+        listHeader.text = "AVAILABLE CONFIGS (${adapter.items.size})"
+    }
+
     private fun toast(msg: String) {
         if (isAdded) Toast.makeText(requireContext(), msg, Toast.LENGTH_SHORT).show()
     }
-
 }

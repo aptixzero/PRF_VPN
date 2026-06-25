@@ -139,4 +139,24 @@
 
     <!-- ===== v3.8 — Config feed ===== -->
     <string name="feed_unreachable_offline">Feed unreachable — showing cached configs</string>
+
+    <!-- ===== v4.0 — Home / Connect screen (UI sheet) ===== -->
+    <string name="select_server">SELECT SERVER</string>
+    <string name="tap_to_connect">TAP TO CONNECT</string>
+    <string name="tap_to_disconnect">TAP TO DISCONNECT</string>
+    <string name="proto_vless">VLESS</string>
+    <string name="proto_vmess">VMESS</string>
+    <string name="proto_xray">XRAY CORE</string>
+    <string name="stat_connection">CONNECTION</string>
+    <string name="stat_data_usage">DATA USAGE</string>
+    <string name="stat_ip_address">IP ADDRESS</string>
+    <string name="qa_auto_connect">AUTO\nCONNECT</string>
+    <string name="qa_kill_switch">KILL\nSWITCH</string>
+    <string name="qa_protocol">PROTOCOL</string>
+    <string name="qa_settings">SETTINGS</string>
+    <string name="value_dash">—</string>
+
+    <!-- ===== v4.0 — Splash (UI sheet screen 01) ===== -->
+    <string name="splash_brand">PROFESSOR VPN</string>
+    <string name="splash_tagline">Secure · Fast · Unlimited</string>
 </resources>

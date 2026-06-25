@@ -152,6 +152,17 @@ class MainActivity : BaseActivity() {
         highlightTab(TAB_CONNECT)
     }
 
+    /** Public: jump to the My Configs tab (used by the Home server-selector card). */
+    fun showConfigsTab() {
+        switchTo(configsFragment)
+        highlightTab(TAB_CONFIGS)
+    }
+
+    /** Public: open the Settings screen (used by the Home quick-action button). */
+    fun openSettings() {
+        startActivity(Intent(this, SettingsActivity::class.java))
+    }
+
     private fun highlightTab(which: Int) {
         findViewById<TextView>(R.id.nav_connect).isSelected = which == TAB_CONNECT
         findViewById<TextView>(R.id.nav_configs).isSelected = which == TAB_CONFIGS

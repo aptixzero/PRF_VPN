@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- WARNING button: dark fill, thin amber border, amber text. -->
+<selector xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:state_pressed="true">
+        <shape android:shape="rectangle">
+            <corners android:radius="14dp" />
+            <solid android:color="#22F59E0B" />
+            <stroke android:width="1.4dp" android:color="@color/state_warning" />
+        </shape>
+    </item>
+    <item>
+        <shape android:shape="rectangle">
+            <corners android:radius="14dp" />
+            <solid android:color="#FF0B0816" />
+            <stroke android:width="1.2dp" android:color="@color/state_warning" />
+        </shape>
+    </item>
+</selector>

@@ -1,5 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- ============================================================= -->
+<!-- v4.0 HOME / CONNECT screen — matches the "VPN UI Sheet"        -->
+<!-- (screens 02/03/04). Server selector card → animated globe →    -->
+<!-- TAP TO CONNECT pill → protocol segmented tabs → live stats →   -->
+<!-- four circular quick-action buttons.                            -->
+<!-- ============================================================= -->
 <ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:fillViewport="true"
@@ -9,37 +16,24 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="vertical"
-        android:gravity="center_horizontal"
-        android:paddingHorizontal="22dp"
+        android:paddingHorizontal="18dp"
         android:paddingTop="10dp"
-        android:paddingBottom="26dp">
+        android:paddingBottom="22dp">
 
-        <!-- ===== Header: admin-controlled app logo + clean wordmark ===== -->
-        <ImageView
-            android:id="@+id/app_logo"
-            android:layout_width="56dp"
-            android:layout_height="56dp"
-            android:layout_marginTop="4dp"
-            android:src="@mipmap/ic_launcher_round"
-            android:contentDescription="@string/app_name"
-            android:visibility="gone" />
-
-        <!-- Brand row: themed Telegram icon (LEFT) + Professor VPN wordmark.
-             The icon opens the admin-configured "In-App Telegram Link". It is
-             styled in the app's purple/black theme (NOT Telegram blue) with a
-             violet glow plate so it feels integrated, not pasted on. -->
+        <!-- ===== Brand row: telegram icon + wordmark ===== -->
         <LinearLayout
-            android:layout_width="wrap_content"
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="horizontal"
             android:gravity="center_vertical"
-            android:layout_marginTop="8dp">
+            android:layout_marginTop="2dp"
+            android:layout_marginBottom="6dp">
 
             <FrameLayout
                 android:id="@+id/telegram_icon"
-                android:layout_width="40dp"
-                android:layout_height="40dp"
-                android:layout_marginEnd="11dp"
+                android:layout_width="38dp"
+                android:layout_height="38dp"
+                android:layout_marginEnd="10dp"
                 android:background="@drawable/telegram_icon_bg"
                 android:clickable="true"
                 android:focusable="true"
@@ -47,91 +41,219 @@
                 android:contentDescription="@string/telegram_channel">
 
                 <ImageView
-                    android:layout_width="22dp"
-                    android:layout_height="22dp"
+                    android:layout_width="20dp"
+                    android:layout_height="20dp"
                     android:layout_gravity="center"
                     android:src="@drawable/ic_telegram"
-                    app:tint="@color/violet_bright"
-                    xmlns:app="http://schemas.android.com/apk/res-auto" />
+                    app:tint="@color/violet_bright" />
             </FrameLayout>
 
-            <TextView
-                android:id="@+id/brand"
-                android:layout_width="wrap_content"
+            <ImageView
+                android:id="@+id/app_logo"
+                android:layout_width="36dp"
+                android:layout_height="36dp"
+                android:layout_marginEnd="8dp"
+                android:src="@mipmap/ic_launcher_round"
+                android:contentDescription="@string/app_name"
+                android:visibility="gone" />
+
+            <LinearLayout
+                android:layout_width="0dp"
                 android:layout_height="wrap_content"
-                android:text="@string/app_brand"
-                android:textColor="?attr/appTextPrimary"
-                android:textSize="25sp"
-                android:textStyle="bold"
-                android:letterSpacing="0.16"
-                android:shadowColor="@color/violet"
-                android:shadowDx="0" android:shadowDy="0" android:shadowRadius="24" />
+                android:layout_weight="1"
+                android:orientation="vertical">
+
+                <TextView
+                    android:id="@+id/brand"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/app_brand"
+                    android:textColor="?attr/appTextPrimary"
+                    android:textSize="19sp"
+                    android:textStyle="bold"
+                    android:letterSpacing="0.1"
+                    android:shadowColor="@color/violet"
+                    android:shadowDx="0" android:shadowDy="0" android:shadowRadius="20" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/app_tagline"
+                    android:textColor="@color/violet_bright"
+                    android:textSize="8sp"
+                    android:letterSpacing="0.24"
+                    android:layout_marginTop="1dp" />
+            </LinearLayout>
         </LinearLayout>
 
-        <TextView
-            android:layout_width="wrap_content"
+        <!-- ===== Server selector card ===== -->
+        <LinearLayout
+            android:id="@+id/server_selector"
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="@string/app_tagline"
-            android:textColor="@color/violet_bright"
-            android:textSize="9sp"
-            android:letterSpacing="0.34"
-            android:layout_marginTop="4dp" />
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:background="@drawable/server_selector_bg"
+            android:padding="14dp"
+            android:clickable="true"
+            android:focusable="true"
+            android:foreground="?attr/selectableItemBackground"
+            android:layout_marginTop="4dp">
 
-        <!-- ===== Connect control: premium button → morphs into 3-D eye ===== -->
+            <View
+                android:layout_width="34dp"
+                android:layout_height="34dp"
+                android:background="@drawable/proto_tag_bg" />
+
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:orientation="vertical"
+                android:layout_marginStart="12dp">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/select_server"
+                    android:textColor="@color/violet_bright"
+                    android:textSize="9sp"
+                    android:letterSpacing="0.18" />
+
+                <TextView
+                    android:id="@+id/server_text"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="@string/no_config"
+                    android:textColor="?attr/appTextPrimary"
+                    android:textSize="14sp"
+                    android:textStyle="bold"
+                    android:maxLines="1"
+                    android:ellipsize="end"
+                    android:layout_marginTop="2dp" />
+            </LinearLayout>
+
+            <ImageView
+                android:layout_width="22dp"
+                android:layout_height="22dp"
+                android:src="@drawable/ic_chevron_right"
+                app:tint="@color/text_secondary"
+                android:contentDescription="@string/select_server" />
+        </LinearLayout>
+
+        <!-- ===== Animated globe centrepiece ===== -->
         <FrameLayout
-            android:id="@+id/switch_float"
-            android:layout_width="188dp"
-            android:layout_height="188dp"
-            android:layout_marginTop="24dp">
+            android:layout_width="match_parent"
+            android:layout_height="256dp"
+            android:layout_marginTop="14dp">
 
-            <com.neonvpn.app.ui.widget.LiquidOrbConnectView
-                android:id="@+id/connect_control"
-                android:layout_width="match_parent"
-                android:layout_height="match_parent" />
+            <com.neonvpn.app.ui.widget.GlobeConnectView
+                android:id="@+id/globe"
+                android:layout_width="256dp"
+                android:layout_height="256dp"
+                android:layout_gravity="center" />
+
+            <TextView
+                android:id="@+id/ping_value"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_gravity="bottom|center_horizontal"
+                android:text="@string/value_dash"
+                android:textColor="?attr/appTextPrimary"
+                android:textSize="12sp"
+                android:visibility="invisible" />
         </FrameLayout>
 
-        <!-- ===== Status ===== -->
+        <!-- ===== Status text ===== -->
         <TextView
             android:id="@+id/status_text"
-            android:layout_width="wrap_content"
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
+            android:gravity="center"
             android:text="@string/disconnected"
             android:textColor="?attr/appTextSecondary"
-            android:textSize="16sp"
+            android:textSize="14sp"
             android:textStyle="bold"
-            android:letterSpacing="0.18"
-            android:layout_marginTop="14dp" />
+            android:letterSpacing="0.16"
+            android:layout_marginTop="6dp" />
 
-        <TextView
-            android:id="@+id/server_text"
+        <!-- ===== TAP TO CONNECT pill ===== -->
+        <FrameLayout
+            android:id="@+id/connect_control"
+            android:layout_width="match_parent"
+            android:layout_height="56dp"
+            android:layout_marginTop="14dp"
+            android:background="@drawable/connect_pill_idle"
+            android:clickable="true"
+            android:focusable="true"
+            android:foreground="?attr/selectableItemBackground">
+
+            <TextView
+                android:id="@+id/connect_label"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_gravity="center"
+                android:text="@string/tap_to_connect"
+                android:textColor="#FFFFFFFF"
+                android:textSize="15sp"
+                android:textStyle="bold"
+                android:letterSpacing="0.18" />
+        </FrameLayout>
+
+        <!-- ===== Protocol segmented tabs ===== -->
+        <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="@string/no_config"
-            android:textColor="?attr/appTextPrimary"
-            android:textSize="13sp"
-            android:gravity="center"
-            android:maxLines="1"
-            android:ellipsize="end"
-            android:layout_marginTop="5dp" />
+            android:orientation="horizontal"
+            android:background="@drawable/seg_group_bg"
+            android:padding="4dp"
+            android:layout_marginTop="14dp"
+            android:weightSum="3">
 
-        <!-- ===== Panel-controlled in-app banner (separate from website) =====
-             v3.6: a FIXED, well-proportioned banner. The uploaded image / GIF is
-             shown WHOLE (FIT_CENTER) with a small safe margin so it is never
-             cropped, never overflows the card, and text inside the art is fully
-             visible. Text-only banners stay centred and fully readable. -->
-        <com.neonvpn.app.ui.widget.AdBanner
-            android:id="@+id/ad_banner"
-            android:layout_width="match_parent"
-            android:layout_height="180dp"
-            android:layout_marginTop="18dp" />
+            <TextView
+                android:id="@+id/proto_vless"
+                android:layout_width="0dp"
+                android:layout_height="38dp"
+                android:layout_weight="1"
+                android:gravity="center"
+                android:text="@string/proto_vless"
+                android:textColor="#FFFFFFFF"
+                android:textSize="12sp"
+                android:textStyle="bold"
+                android:background="@drawable/seg_tab_bg" />
 
-        <!-- ===== Speed meter: Download / Upload ===== -->
+            <TextView
+                android:id="@+id/proto_vmess"
+                android:layout_width="0dp"
+                android:layout_height="38dp"
+                android:layout_weight="1"
+                android:gravity="center"
+                android:text="@string/proto_vmess"
+                android:textColor="@color/text_secondary"
+                android:textSize="12sp"
+                android:textStyle="bold"
+                android:background="@drawable/seg_tab_bg" />
+
+            <TextView
+                android:id="@+id/proto_xray"
+                android:layout_width="0dp"
+                android:layout_height="38dp"
+                android:layout_weight="1"
+                android:gravity="center"
+                android:text="@string/proto_xray"
+                android:textColor="@color/text_secondary"
+                android:textSize="12sp"
+                android:textStyle="bold"
+                android:background="@drawable/seg_tab_bg" />
+        </LinearLayout>
+
+        <!-- ===== Speed meter: download / upload / uptime ===== -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="horizontal"
             android:layout_marginTop="14dp"
-            android:weightSum="2">
+            android:weightSum="3">
 
             <LinearLayout
                 android:layout_width="0dp"
@@ -140,23 +262,23 @@
                 android:orientation="vertical"
                 android:gravity="center"
                 android:background="@drawable/stat_chip"
-                android:padding="15dp"
-                android:layout_marginEnd="6dp">
+                android:padding="12dp"
+                android:layout_marginEnd="5dp">
 
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:text="@string/download"
                     android:textColor="@color/violet_bright"
-                    android:textSize="10sp"
-                    android:letterSpacing="0.2" />
+                    android:textSize="9sp"
+                    android:letterSpacing="0.14" />
                 <TextView
                     android:id="@+id/download_speed"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:text="0 B/s"
                     android:textColor="?attr/appTextPrimary"
-                    android:textSize="18sp"
+                    android:textSize="15sp"
                     android:textStyle="bold"
                     android:layout_marginTop="3dp" />
                 <TextView
@@ -165,8 +287,8 @@
                     android:layout_height="wrap_content"
                     android:text="0 B"
                     android:textColor="?attr/appTextSecondary"
-                    android:textSize="11sp"
-                    android:layout_marginTop="2dp" />
+                    android:textSize="10sp"
+                    android:layout_marginTop="1dp" />
             </LinearLayout>
 
             <LinearLayout
@@ -176,23 +298,23 @@
                 android:orientation="vertical"
                 android:gravity="center"
                 android:background="@drawable/stat_chip"
-                android:padding="15dp"
-                android:layout_marginStart="6dp">
+                android:padding="12dp"
+                android:layout_marginHorizontal="5dp">
 
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:text="@string/upload"
                     android:textColor="@color/neon_blue"
-                    android:textSize="10sp"
-                    android:letterSpacing="0.2" />
+                    android:textSize="9sp"
+                    android:letterSpacing="0.14" />
                 <TextView
                     android:id="@+id/upload_speed"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:text="0 B/s"
                     android:textColor="?attr/appTextPrimary"
-                    android:textSize="18sp"
+                    android:textSize="15sp"
                     android:textStyle="bold"
                     android:layout_marginTop="3dp" />
                 <TextView
@@ -201,45 +323,8 @@
                     android:layout_height="wrap_content"
                     android:text="0 B"
                     android:textColor="?attr/appTextSecondary"
-                    android:textSize="11sp"
-                    android:layout_marginTop="2dp" />
-            </LinearLayout>
-        </LinearLayout>
-
-        <!-- ===== Ping / Uptime row ===== -->
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="horizontal"
-            android:layout_marginTop="10dp"
-            android:weightSum="2">
-
-            <LinearLayout
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:orientation="vertical"
-                android:gravity="center"
-                android:background="@drawable/stat_chip"
-                android:padding="13dp"
-                android:layout_marginEnd="6dp">
-
-                <TextView
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="@string/ping"
-                    android:textColor="@color/neon_purple"
                     android:textSize="10sp"
-                    android:letterSpacing="0.2" />
-                <TextView
-                    android:id="@+id/ping_value"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="—"
-                    android:textColor="?attr/appTextPrimary"
-                    android:textSize="16sp"
-                    android:textStyle="bold"
-                    android:layout_marginTop="3dp" />
+                    android:layout_marginTop="1dp" />
             </LinearLayout>
 
             <LinearLayout
@@ -249,27 +334,260 @@
                 android:orientation="vertical"
                 android:gravity="center"
                 android:background="@drawable/stat_chip"
-                android:padding="13dp"
-                android:layout_marginStart="6dp">
+                android:padding="12dp"
+                android:layout_marginStart="5dp">
 
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:text="@string/duration"
-                    android:textColor="@color/neon_blue"
-                    android:textSize="10sp"
-                    android:letterSpacing="0.2" />
+                    android:textColor="@color/neon_purple"
+                    android:textSize="9sp"
+                    android:letterSpacing="0.14" />
                 <TextView
                     android:id="@+id/uptime_value"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:text="00:00:00"
                     android:textColor="?attr/appTextPrimary"
-                    android:textSize="16sp"
+                    android:textSize="13sp"
                     android:textStyle="bold"
                     android:layout_marginTop="3dp" />
             </LinearLayout>
         </LinearLayout>
+
+        <!-- ===== Connection / data usage / ip row ===== -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:background="@drawable/stat_chip"
+            android:padding="12dp"
+            android:layout_marginTop="10dp"
+            android:weightSum="3">
+
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:orientation="vertical"
+                android:gravity="center">
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/stat_connection"
+                    android:textColor="?attr/appTextSecondary"
+                    android:textSize="8sp"
+                    android:letterSpacing="0.1" />
+                <TextView
+                    android:id="@+id/stat_connection_value"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/disconnected"
+                    android:textColor="?attr/appTextPrimary"
+                    android:textSize="11sp"
+                    android:textStyle="bold"
+                    android:layout_marginTop="2dp" />
+            </LinearLayout>
+
+            <View
+                android:layout_width="1dp"
+                android:layout_height="match_parent"
+                android:background="@color/card_border_lite" />
+
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:orientation="vertical"
+                android:gravity="center">
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/stat_data_usage"
+                    android:textColor="?attr/appTextSecondary"
+                    android:textSize="8sp"
+                    android:letterSpacing="0.1" />
+                <TextView
+                    android:id="@+id/stat_data_value"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="0 B"
+                    android:textColor="?attr/appTextPrimary"
+                    android:textSize="11sp"
+                    android:textStyle="bold"
+                    android:layout_marginTop="2dp" />
+            </LinearLayout>
+
+            <View
+                android:layout_width="1dp"
+                android:layout_height="match_parent"
+                android:background="@color/card_border_lite" />
+
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:orientation="vertical"
+                android:gravity="center">
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/stat_ip_address"
+                    android:textColor="?attr/appTextSecondary"
+                    android:textSize="8sp"
+                    android:letterSpacing="0.1" />
+                <TextView
+                    android:id="@+id/stat_ip_value"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/value_dash"
+                    android:textColor="?attr/appTextPrimary"
+                    android:textSize="11sp"
+                    android:textStyle="bold"
+                    android:layout_marginTop="2dp" />
+            </LinearLayout>
+        </LinearLayout>
+
+        <!-- ===== Four circular quick-action buttons ===== -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:layout_marginTop="16dp"
+            android:weightSum="4">
+
+            <LinearLayout
+                android:id="@+id/qa_auto_connect"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:orientation="vertical"
+                android:gravity="center"
+                android:clickable="true"
+                android:focusable="true">
+                <FrameLayout
+                    android:layout_width="50dp"
+                    android:layout_height="50dp"
+                    android:background="@drawable/quick_action_bg"
+                    android:foreground="?attr/selectableItemBackgroundBorderless">
+                    <ImageView
+                        android:layout_width="22dp"
+                        android:layout_height="22dp"
+                        android:layout_gravity="center"
+                        android:src="@drawable/ic_bolt"
+                        app:tint="@color/violet_bright" />
+                </FrameLayout>
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/qa_auto_connect"
+                    android:gravity="center"
+                    android:textColor="?attr/appTextSecondary"
+                    android:textSize="8sp"
+                    android:layout_marginTop="5dp" />
+            </LinearLayout>
+
+            <LinearLayout
+                android:id="@+id/qa_kill_switch"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:orientation="vertical"
+                android:gravity="center"
+                android:clickable="true"
+                android:focusable="true">
+                <FrameLayout
+                    android:layout_width="50dp"
+                    android:layout_height="50dp"
+                    android:background="@drawable/quick_action_bg"
+                    android:foreground="?attr/selectableItemBackgroundBorderless">
+                    <ImageView
+                        android:layout_width="22dp"
+                        android:layout_height="22dp"
+                        android:layout_gravity="center"
+                        android:src="@drawable/ic_shield"
+                        app:tint="@color/violet_bright" />
+                </FrameLayout>
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/qa_kill_switch"
+                    android:gravity="center"
+                    android:textColor="?attr/appTextSecondary"
+                    android:textSize="8sp"
+                    android:layout_marginTop="5dp" />
+            </LinearLayout>
+
+            <LinearLayout
+                android:id="@+id/qa_protocol"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:orientation="vertical"
+                android:gravity="center"
+                android:clickable="true"
+                android:focusable="true">
+                <FrameLayout
+                    android:layout_width="50dp"
+                    android:layout_height="50dp"
+                    android:background="@drawable/quick_action_bg"
+                    android:foreground="?attr/selectableItemBackgroundBorderless">
+                    <ImageView
+                        android:layout_width="22dp"
+                        android:layout_height="22dp"
+                        android:layout_gravity="center"
+                        android:src="@drawable/ic_swap"
+                        app:tint="@color/violet_bright" />
+                </FrameLayout>
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/qa_protocol"
+                    android:gravity="center"
+                    android:textColor="?attr/appTextSecondary"
+                    android:textSize="8sp"
+                    android:layout_marginTop="5dp" />
+            </LinearLayout>
+
+            <LinearLayout
+                android:id="@+id/qa_settings"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:orientation="vertical"
+                android:gravity="center"
+                android:clickable="true"
+                android:focusable="true">
+                <FrameLayout
+                    android:layout_width="50dp"
+                    android:layout_height="50dp"
+                    android:background="@drawable/quick_action_bg"
+                    android:foreground="?attr/selectableItemBackgroundBorderless">
+                    <ImageView
+                        android:layout_width="22dp"
+                        android:layout_height="22dp"
+                        android:layout_gravity="center"
+                        android:src="@drawable/ic_settings"
+                        app:tint="@color/violet_bright" />
+                </FrameLayout>
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/qa_settings"
+                    android:gravity="center"
+                    android:textColor="?attr/appTextSecondary"
+                    android:textSize="8sp"
+                    android:layout_marginTop="5dp" />
+            </LinearLayout>
+        </LinearLayout>
+
+        <!-- ===== Panel-controlled in-app banner ===== -->
+        <com.neonvpn.app.ui.widget.AdBanner
+            android:id="@+id/ad_banner"
+            android:layout_width="match_parent"
+            android:layout_height="150dp"
+            android:layout_marginTop="16dp" />
 
     </LinearLayout>
 </ScrollView>

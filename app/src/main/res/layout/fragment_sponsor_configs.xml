@@ -41,7 +41,7 @@
         android:textSize="13sp"
         android:textStyle="bold"
         android:letterSpacing="0.06"
-        android:background="@drawable/btn_outline"
+        android:background="@drawable/btn_secondary"
         android:clickable="true"
         android:focusable="true" />
 
@@ -60,7 +60,7 @@
             android:layout_height="10dp"
             android:max="100"
             android:progress="0"
-            android:progressDrawable="@drawable/boot_progress" />
+            android:progressDrawable="@drawable/neon_progress" />
 
         <TextView
             android:id="@+id/progress_label"

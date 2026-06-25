@@ -1,51 +1,65 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <!-- ============================================================= -->
-    <!-- Professor VPN — PREMIUM BLACK / DARK-CYBER palette (v2.9)       -->
-    <!-- Pure-black dominant surfaces, restrained violet accent lighting,-->
-    <!-- thin white borders. No red-heavy / green-heavy gaming look.     -->
+    <!-- Professor VPN — v4.0 "VPN UI SHEET" palette                    -->
+    <!-- Pure-black base, violet/purple neon accents, green=connected,  -->
+    <!-- amber=warning, magenta/red=danger. Matches the design sheet.   -->
     <!-- ============================================================= -->
 
-    <!-- Surfaces: pure black → near-black glass tiers -->
+    <!-- Surfaces: pure black → dark navy/violet glass tiers -->
     <color name="bg_deep">#FF000000</color>
-    <color name="bg_panel">#FF060608</color>
-    <color name="bg_card">#FF0B0B0F</color>
-    <color name="bg_card_active">#FF14101F</color>
+    <color name="bg_panel">#FF06040C</color>
+    <color name="bg_card">#FF0B0816</color>
+    <color name="bg_card_active">#FF160E28</color>
+    <color name="card_border">#FF1C162E</color>
+    <color name="card_border_lite">#FF272042</color>
 
-    <!-- Primary accent = premium violet (matches the logo glow). -->
-    <color name="neon_green">#FFA855F7</color>      <!-- semantic "go"  -> violet -->
-    <color name="neon_green_dim">#FF7C3AED</color>
-    <color name="neon_red">#FFC026D3</color>        <!-- semantic "alert" -> magenta -->
-    <color name="neon_red_dim">#FF86198F</color>
+    <!-- Primary accent = neon violet (the sheet's signature colour). -->
+    <color name="neon_green">#FF8A3FFC</color>      <!-- semantic "go"  -> violet (legacy alias) -->
+    <color name="neon_green_dim">#FF4C2896</color>
+    <color name="neon_red">#FFEF4444</color>        <!-- semantic "alert" -> red -->
+    <color name="neon_red_dim">#FFDC2626</color>
 
-    <!-- Accent ramp (violet / indigo / fuchsia) used across stat chips. -->
-    <color name="neon_cyan">#FFA855F7</color>       <!-- alias -> violet -->
-    <color name="neon_magenta">#FFC026D3</color>    <!-- alias -> magenta -->
+    <!-- Accent ramp -->
+    <color name="neon_cyan">#FF8A3FFC</color>       <!-- alias -> violet -->
+    <color name="neon_magenta">#FFC026D3</color>
     <color name="neon_purple">#FFB983FF</color>
     <color name="neon_blue">#FF818CF8</color>
-    <color name="neon_yellow">#FFE9D5FF</color>
+    <color name="neon_yellow">#FFF59E0B</color>
 
-    <!-- Brand glow + violet accent in various intensities -->
-    <color name="violet">#FFA855F7</color>
-    <color name="violet_bright">#FFC084FC</color>
-    <color name="violet_deep">#FF6D28D9</color>
-    <color name="violet_glow">#66A855F7</color>
+    <!-- Brand violet ramp -->
+    <color name="violet">#FF8A3FFC</color>
+    <color name="violet_bright">#FFB983FF</color>
+    <color name="violet_deep">#FF4C2896</color>
+    <color name="violet_darker">#FF311B61</color>
+    <color name="violet_glow">#668A3FFC</color>
+
+    <!-- Semantic state colours (connected / warning / danger) -->
+    <color name="state_connected">#FF10B981</color>
+    <color name="state_connected_dim">#FF059669</color>
+    <color name="state_warning">#FFF59E0B</color>
+    <color name="state_danger">#FFEF4444</color>
+
+    <!-- Ping latency colours (sheet: green<50 / amber 51-100 / red>100) -->
+    <color name="ping_fast">#FF10B981</color>
+    <color name="ping_med">#FFF59E0B</color>
+    <color name="ping_slow">#FFEF4444</color>
 
     <!-- legacy glitch aliases (kept so old refs resolve; no glitch used) -->
-    <color name="glitch_cyan">#55A855F7</color>
+    <color name="glitch_cyan">#558A3FFC</color>
     <color name="glitch_magenta">#55C026D3</color>
 
     <!-- Text -->
     <color name="text_primary">#FFF4F2FB</color>
-    <color name="text_secondary">#FF8A8597</color>
-    <color name="text_dim">#FF45414F</color>
+    <color name="text_secondary">#FF9089A8</color>
+    <color name="text_dim">#FF4C4660</color>
 
-    <!-- Thin white-ish hairline borders (the premium look) -->
+    <!-- Hairline borders -->
     <color name="stroke">#1FFFFFFF</color>
     <color name="stroke_dim">#12FFFFFF</color>
     <color name="hairline">#26FFFFFF</color>
 
-    <!-- ===== LIGHT theme palette (kept; violet brand on light surfaces) ===== -->
+    <!-- ===== LIGHT theme palette ===== -->
     <color name="lbg_deep">#FFF4F2F8</color>
     <color name="lbg_panel">#FFFFFFFF</color>
     <color name="lbg_card">#FFFFFFFF</color>
@@ -53,5 +67,5 @@
     <color name="ltext_secondary">#FF59526A</color>
     <color name="ltext_dim">#FFA59CB5</color>
     <color name="lneon_green">#FF7C3AED</color>
-    <color name="lneon_red">#FFA21CAF</color>
+    <color name="lneon_red">#FFDC2626</color>
 </resources>

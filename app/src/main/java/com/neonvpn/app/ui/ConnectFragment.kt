@@ -8,6 +8,8 @@ import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
+import android.view.animation.OvershootInterpolator
+import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.TextView
 import androidx.activity.result.contract.ActivityResultContracts
@@ -21,7 +23,7 @@ import com.neonvpn.app.config.ConfigStore
 import com.neonvpn.app.config.RemoteConfig
 import com.neonvpn.app.config.RemoteConfigStore
 import com.neonvpn.app.service.NeonVpnService
-import com.neonvpn.app.ui.widget.LiquidOrbConnectView
+import com.neonvpn.app.ui.widget.GlobeConnectView
 import com.neonvpn.app.util.Format
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -34,13 +36,15 @@ import java.net.HttpURLConnection
 import java.net.URL
 
 /**
- * Home / Connect screen. The connect control is a v3.8 LIQUID ORB
- * (see [LiquidOrbConnectView]) with five states & a real connect-progress arc:
- *   IDLE · CONNECTING (with 0..100% arc) · CONNECTED · DISCONNECTING · ERROR.
- * Tapping the orb toggles the real VpnService on/off (350ms-debounced, serialised
- * through a single Mutex-guarded state-machine coroutine — §4.5).
+ * v4.0 HOME / CONNECT screen — matches the UI sheet (screens 02/03/04).
  *
- * All speed / ping / uptime numbers shown here come straight from the live Xray
+ * Centrepiece is the animated [GlobeConnectView] (a rotating violet wireframe
+ * globe that turns emerald-green with a check shield when connected). The big
+ * TAP TO CONNECT pill below it toggles the real VpnService on/off — it is
+ * 350ms-debounced and serialised through a single Mutex-guarded state-machine
+ * coroutine (§4.5) so rapid taps can never spawn overlapping start/stop work.
+ *
+ * Every speed / ping / data / uptime number comes straight from the live Xray
  * core via [NeonVpnService] — there are NO random / fake values anywhere.
  */
 class ConnectFragment : Fragment() {
@@ -48,20 +52,36 @@ class ConnectFragment : Fragment() {
     private lateinit var store: ConfigStore
     private lateinit var statusText: TextView
     private lateinit var serverText: TextView
-    private lateinit var orb: LiquidOrbConnectView
+    private lateinit var globe: GlobeConnectView
+    private lateinit var connectPill: FrameLayout
+    private lateinit var connectLabel: TextView
     private var appLogo: ImageView? = null
     private var telegramIcon: View? = null
 
+    // Protocol segmented tabs (cosmetic selector reflecting the active config).
+    private var protoVless: TextView? = null
+    private var protoVmess: TextView? = null
+    private var protoXray: TextView? = null
+
+    // Connection / data-usage / ip summary row.
+    private var statConnection: TextView? = null
+    private var statData: TextView? = null
+    private var statIp: TextView? = null
+
+    private lateinit var downloadSpeed: TextView
+    private lateinit var downloadTotal: TextView
+    private lateinit var uploadSpeed: TextView
+    private lateinit var uploadTotal: TextView
+    private lateinit var pingValue: TextView
+    private lateinit var uptimeValue: TextView
+
     // §4.5 — a SINGLE state-machine coroutine consumes toggle intents through a
-    // CONFLATED channel (latest-tap-wins) guarded by a Mutex, so rapid taps can
-    // never spawn overlapping start/stop sequences. Taps are 350ms-debounced.
+    // CONFLATED channel (latest-tap-wins) guarded by a Mutex.
     private val toggleChannel = Channel<Unit>(Channel.CONFLATED)
     private val toggleMutex = Mutex()
     private var lastTapMs = 0L
     private val tapDebounceMs = 350L
 
-    /** Live in-app Telegram URL (admin-controlled). Kept in sync via the remote
-     *  config listener so the icon always opens the latest published channel. */
     @Volatile private var telegramUrl: String = ""
 
     private val remoteListener: (RemoteConfig) -> Unit = { cfg ->
@@ -70,13 +90,6 @@ class ConnectFragment : Fragment() {
             telegramUrl = cfg.homeTelegramUrl
         }
     }
-
-    private lateinit var downloadSpeed: TextView
-    private lateinit var downloadTotal: TextView
-    private lateinit var uploadSpeed: TextView
-    private lateinit var uploadTotal: TextView
-    private lateinit var pingValue: TextView
-    private lateinit var uptimeValue: TextView
 
     private val listener: (String, String) -> Unit = { state, info ->
         activity?.runOnUiThread { render(state, info) }
@@ -105,19 +118,19 @@ class ConnectFragment : Fragment() {
         store = ConfigStore(requireContext())
         statusText = view.findViewById(R.id.status_text)
         serverText = view.findViewById(R.id.server_text)
-        orb = view.findViewById(R.id.connect_control)
+        globe = view.findViewById(R.id.globe)
+        connectPill = view.findViewById(R.id.connect_control)
+        connectLabel = view.findViewById(R.id.connect_label)
         appLogo = view.findViewById(R.id.app_logo)
         telegramIcon = view.findViewById(R.id.telegram_icon)
 
-        // §4.2 — Telegram icon opens the admin-configured "In-App Telegram Link"
-        // (never a hardcoded link). Seed from the dedicated pref cache so the icon
-        // is correct instantly on cold start; the remote listener keeps it live.
-        telegramUrl = RemoteConfigStore.cachedTelegramUrl(requireContext())
-        telegramIcon?.setOnClickListener { openTelegram() }
-        // Refresh on start (background) so an operator change is picked up.
-        viewLifecycleOwner.lifecycleScope.launch {
-            RemoteConfigStore.refreshTelegramThrottled(requireContext())
-        }
+        protoVless = view.findViewById(R.id.proto_vless)
+        protoVmess = view.findViewById(R.id.proto_vmess)
+        protoXray = view.findViewById(R.id.proto_xray)
+
+        statConnection = view.findViewById(R.id.stat_connection_value)
+        statData = view.findViewById(R.id.stat_data_value)
+        statIp = view.findViewById(R.id.stat_ip_value)
 
         downloadSpeed = view.findViewById(R.id.download_speed)
         downloadTotal = view.findViewById(R.id.download_total)
@@ -126,21 +139,49 @@ class ConnectFragment : Fragment() {
         pingValue = view.findViewById(R.id.ping_value)
         uptimeValue = view.findViewById(R.id.uptime_value)
 
-        orb.onClick = { onTap() }
+        // §4.2 — Telegram icon opens the admin-configured "In-App Telegram Link".
+        telegramUrl = RemoteConfigStore.cachedTelegramUrl(requireContext())
+        telegramIcon?.setOnClickListener { openTelegram() }
+        viewLifecycleOwner.lifecycleScope.launch {
+            RemoteConfigStore.refreshTelegramThrottled(requireContext())
+        }
 
-        // §4.5 — single state-machine consumer + §4.3 — observe connect progress.
-        // Both run on viewLifecycleOwner so they're torn down with the view.
+        // Connect pill: animated press → toggle. The globe is the visualizer,
+        // the pill is the action button (matches the UI sheet).
+        connectPill.setOnClickListener { animatePillPress(); onTap() }
+
+        // Quick-action buttons navigate / hint (functional but lightweight).
+        view.findViewById<View?>(R.id.server_selector)?.setOnClickListener {
+            (activity as? MainActivity)?.showConfigsTab()
+        }
+        view.findViewById<View?>(R.id.qa_settings)?.setOnClickListener {
+            (activity as? MainActivity)?.openSettings()
+        }
+        view.findViewById<View?>(R.id.qa_protocol)?.setOnClickListener {
+            (activity as? MainActivity)?.showConfigsTab()
+        }
+
         startToggleStateMachine()
-        observeProgress()
 
         maybeAskNotifications()
     }
 
-    /**
-     * §4.5 — a tap just OFFERS a debounced intent to the conflated channel. The
-     * single consumer ([startToggleStateMachine]) serialises the actual
-     * start/stop work under a Mutex so overlapping taps can't race.
-     */
+    /** A short, springy scale-down/up so the big pill feels physical when tapped. */
+    private fun animatePillPress() {
+        connectPill.animate().cancel()
+        connectPill.animate()
+            .scaleX(0.94f).scaleY(0.94f)
+            .setDuration(90)
+            .withEndAction {
+                connectPill.animate()
+                    .scaleX(1f).scaleY(1f)
+                    .setInterpolator(OvershootInterpolator(2.2f))
+                    .setDuration(220)
+                    .start()
+            }
+            .start()
+    }
+
     private fun onTap() {
         val now = System.currentTimeMillis()
         if (now - lastTapMs < tapDebounceMs) return
@@ -158,28 +199,14 @@ class ConnectFragment : Fragment() {
         }
     }
 
-    /** §4.3 — drive the Liquid Orb's progress arc from the service's StateFlow. */
-    private fun observeProgress() {
-        viewLifecycleOwner.lifecycleScope.launch {
-            viewLifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {
-                VpnStateBus.progress.collect { p -> orb.setProgress(p.percent) }
-            }
-        }
-    }
-
     override fun onResume() {
         super.onResume()
         synchronized(VpnStateBus.listeners) { VpnStateBus.listeners.add(listener) }
         synchronized(VpnStateBus.statsListeners) { VpnStateBus.statsListeners.add(statsListener) }
         RemoteConfigStore.addListener(remoteListener)
-        // Reconcile against the authoritative service state FIRST — while we were
-        // backgrounded the tunnel may have died (watchdog / OS kill) and that
-        // broadcast was missed, so trusting the in-memory bus alone would show a
-        // stale "Connected". This makes the resumed UI always reflect reality.
         VpnStateBus.reconcileWithService()
         render(VpnStateBus.state, VpnStateBus.info)
         renderStats(VpnStateBus.stats)
-        // §4.2 — pick up any operator-changed Telegram link, throttled to 60s.
         telegramUrl = RemoteConfigStore.cachedTelegramUrl(requireContext())
         viewLifecycleOwner.lifecycleScope.launch {
             RemoteConfigStore.refreshTelegramThrottled(requireContext())
@@ -193,7 +220,6 @@ class ConnectFragment : Fragment() {
         RemoteConfigStore.removeListener(remoteListener)
     }
 
-    /** Show the admin-controlled app logo (live). Empty = fall back to wordmark. */
     private fun bindLogo(url: String) {
         val iv = appLogo ?: return
         if (url.isBlank()) { iv.visibility = View.GONE; return }
@@ -202,7 +228,7 @@ class ConnectFragment : Fragment() {
                 val c = (URL(url).openConnection() as HttpURLConnection).apply {
                     connectTimeout = 7000; readTimeout = 9000
                     instanceFollowRedirects = true
-                    setRequestProperty("User-Agent", "ProfessorVPN/2.9")
+                    setRequestProperty("User-Agent", "ProfessorVPN/4.0")
                 }
                 c.inputStream.use { android.graphics.BitmapFactory.decodeStream(it) }
             } catch (_: Throwable) { null }
@@ -214,8 +240,6 @@ class ConnectFragment : Fragment() {
         }
     }
 
-
-    /** Open the live, admin-controlled Telegram channel URL. */
     private fun openTelegram() {
         val url = telegramUrl.ifBlank { RemoteConfigStore.cachedTelegramUrl(requireContext()) }.trim()
         if (url.isBlank()) return
@@ -225,7 +249,7 @@ class ConnectFragment : Fragment() {
                     android.content.Intent.ACTION_VIEW, android.net.Uri.parse(url)
                 ).apply { addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK) }
             )
-        } catch (_: Throwable) { /* no telegram / browser — ignore */ }
+        } catch (_: Throwable) { }
     }
 
     private fun onToggle() {
@@ -240,7 +264,7 @@ class ConnectFragment : Fragment() {
         val selected = store.getSelected()
         if (selected == null) {
             statusText.text = getString(R.string.no_config)
-            orb.setState(LiquidOrbConnectView.State.IDLE)
+            globe.setState(GlobeConnectView.State.IDLE)
             return
         }
 
@@ -271,8 +295,6 @@ class ConnectFragment : Fragment() {
     }
 
     private fun stopVpn() {
-        // brief "disconnecting" beat on the orb before it settles to idle
-        orb.setState(LiquidOrbConnectView.State.DISCONNECTING)
         val intent = Intent(requireContext(), NeonVpnService::class.java).apply {
             action = NeonVpnService.ACTION_STOP
         }
@@ -282,33 +304,63 @@ class ConnectFragment : Fragment() {
 
     private fun render(state: String, info: String) {
         val selected = store.getSelected()
-        serverText.text = selected?.let { "${it.remark}  ·  ${it.protocol.uppercase()}" }
-            ?: getString(R.string.no_config)
+        serverText.text = selected?.remark ?: getString(R.string.no_config)
+        updateProtoTabs(selected?.protocol)
 
         when (state) {
             NeonVpnService.STATE_CONNECTED -> {
                 statusText.text = getString(R.string.connected)
                 statusText.setTextColor(themeColor(R.attr.appAccentGreen))
-                orb.setState(LiquidOrbConnectView.State.CONNECTED)
+                globe.setState(GlobeConnectView.State.CONNECTED)
+                connectLabel.text = getString(R.string.tap_to_disconnect)
+                connectPill.setBackgroundResource(R.drawable.connect_pill_connected)
+                statConnection?.text = getString(R.string.connected)
             }
             NeonVpnService.STATE_CONNECTING -> {
                 statusText.text = getString(R.string.connecting)
                 statusText.setTextColor(0xFFFFB020.toInt())
-                orb.setState(LiquidOrbConnectView.State.CONNECTING)
+                globe.setState(GlobeConnectView.State.CONNECTING)
+                connectLabel.text = getString(R.string.connecting)
+                connectPill.setBackgroundResource(R.drawable.connect_pill_connecting)
+                statConnection?.text = getString(R.string.connecting)
             }
             NeonVpnService.STATE_ERROR -> {
                 statusText.text = if (info.isNotBlank()) "ERROR · $info" else getString(R.string.error)
                 statusText.setTextColor(themeColor(R.attr.appAccentRed))
-                orb.setState(LiquidOrbConnectView.State.ERROR)
+                globe.setState(GlobeConnectView.State.ERROR)
+                connectLabel.text = getString(R.string.tap_to_connect)
+                connectPill.setBackgroundResource(R.drawable.connect_pill_idle)
+                statConnection?.text = getString(R.string.error)
                 resetStats()
             }
             else -> {
                 statusText.text = getString(R.string.disconnected)
                 statusText.setTextColor(themeColor(R.attr.appTextSecondary))
-                orb.setState(LiquidOrbConnectView.State.IDLE)
+                globe.setState(GlobeConnectView.State.IDLE)
+                connectLabel.text = getString(R.string.tap_to_connect)
+                connectPill.setBackgroundResource(R.drawable.connect_pill_idle)
+                statConnection?.text = getString(R.string.disconnected)
                 resetStats()
             }
         }
+    }
+
+    /** Highlight the segmented tab matching the selected config's protocol. */
+    private fun updateProtoTabs(protocol: String?) {
+        val p = protocol?.lowercase() ?: ""
+        val active = themeColor(R.attr.appTextPrimary)
+        val dim = themeColor(R.attr.appTextSecondary)
+        val white = 0xFFFFFFFF.toInt()
+        val isVless = p.contains("vless")
+        val isVmess = p.contains("vmess")
+        val isXray = !isVless && !isVmess && p.isNotEmpty()
+        protoVless?.isSelected = isVless
+        protoVmess?.isSelected = isVmess
+        protoXray?.isSelected = isXray || (!isVless && !isVmess)
+        protoVless?.setTextColor(if (isVless) white else dim)
+        protoVmess?.setTextColor(if (isVmess) white else dim)
+        protoXray?.setTextColor(if (protoXray?.isSelected == true) white else dim)
+        if (protocol == null) { protoVless?.isSelected = true; protoVless?.setTextColor(white); protoXray?.isSelected = false; protoXray?.setTextColor(dim) }
     }
 
     private fun renderStats(s: VpnStats) {
@@ -320,6 +372,7 @@ class ConnectFragment : Fragment() {
         uploadTotal.text = Format.size(s.upTotal)
         pingValue.text = Format.ping(s.ping)
         uptimeValue.text = Format.duration(s.uptime)
+        statData?.text = Format.size(s.downTotal + s.upTotal)
     }
 
     private fun resetStats() {
@@ -327,8 +380,10 @@ class ConnectFragment : Fragment() {
         uploadSpeed.text = "0 B/s"
         downloadTotal.text = "0 B"
         uploadTotal.text = "0 B"
-        pingValue.text = "—"
+        pingValue.text = getString(R.string.value_dash)
         uptimeValue.text = "00:00:00"
+        statData?.text = "0 B"
+        statIp?.text = getString(R.string.value_dash)
     }
 
     private fun themeColor(attr: Int): Int {

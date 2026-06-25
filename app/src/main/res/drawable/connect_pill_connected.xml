@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- CONNECTED pill: emerald gradient. -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
+    <corners android:radius="28dp" />
+    <gradient android:type="linear" android:angle="0"
+        android:startColor="@color/state_connected" android:endColor="@color/state_connected_dim" />
+    <stroke android:width="1dp" android:color="#5500160A" />
+</shape>

@@ -1,13 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:id="@+id/card"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
     android:orientation="horizontal"
     android:gravity="center_vertical"
     android:background="@drawable/card_server"
-    android:padding="12dp"
-    android:layout_marginBottom="8dp"
+    android:padding="13dp"
+    android:layout_marginBottom="9dp"
     android:clickable="true"
     android:focusable="true">
 
@@ -20,18 +21,21 @@
         android:visibility="gone"
         android:layout_marginEnd="12dp" />
 
+    <!-- left protocol tag (VLESS / VMESS) -->
     <TextView
         android:id="@+id/badge"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:minWidth="58dp"
+        android:minWidth="56dp"
         android:gravity="center"
-        android:text="VMESS"
-        android:textColor="@color/neon_cyan"
+        android:text="VLESS"
+        android:textColor="@color/violet_bright"
         android:textSize="9sp"
         android:textStyle="bold"
-        android:padding="6dp"
-        android:background="@drawable/badge_bg" />
+        android:letterSpacing="0.06"
+        android:paddingHorizontal="9dp"
+        android:paddingVertical="6dp"
+        android:background="@drawable/proto_tag_bg" />
 
     <LinearLayout
         android:layout_width="0dp"
@@ -44,7 +48,7 @@
             android:id="@+id/name"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="Server name"
+            android:text="Server 1"
             android:textColor="?attr/appTextPrimary"
             android:textSize="14sp"
             android:textStyle="bold"
@@ -67,36 +71,33 @@
     <!-- per-config PING -->
     <ImageView
         android:id="@+id/ping"
-        android:layout_width="38dp"
-        android:layout_height="38dp"
+        android:layout_width="36dp"
+        android:layout_height="36dp"
         android:padding="9dp"
         android:src="@drawable/ic_ping"
         android:background="?attr/selectableItemBackgroundBorderless"
         android:contentDescription="ping"
-        app:tint="@color/neon_purple"
-        xmlns:app="http://schemas.android.com/apk/res-auto" />
+        app:tint="@color/violet_bright" />
 
     <!-- per-config COPY -->
     <ImageView
         android:id="@+id/copy"
-        android:layout_width="38dp"
-        android:layout_height="38dp"
+        android:layout_width="36dp"
+        android:layout_height="36dp"
         android:padding="9dp"
         android:src="@drawable/ic_copy"
         android:background="?attr/selectableItemBackgroundBorderless"
         android:contentDescription="copy"
-        app:tint="@color/neon_blue"
-        xmlns:app="http://schemas.android.com/apk/res-auto" />
+        app:tint="@color/neon_blue" />
 
     <!-- per-config DELETE -->
     <ImageView
         android:id="@+id/delete"
-        android:layout_width="38dp"
-        android:layout_height="38dp"
+        android:layout_width="36dp"
+        android:layout_height="36dp"
         android:padding="9dp"
         android:src="@drawable/ic_delete"
         android:background="?attr/selectableItemBackgroundBorderless"
         android:contentDescription="delete"
-        app:tint="@color/neon_red"
-        xmlns:app="http://schemas.android.com/apk/res-auto" />
+        app:tint="@color/state_danger" />
 </LinearLayout>

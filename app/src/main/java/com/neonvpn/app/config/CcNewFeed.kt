@@ -10,16 +10,16 @@ import java.net.HttpURLConnection
 import java.net.URL
 
 /**
- * v3.8 CONFIG FEED — `prfgame/CC_new`.
+ * v4.0 CONFIG FEED — `aptixzero/con_new`.
  *
- * The deprecated `prfgame/cccfigs` feed (configs_NN.txt, 10 files) is replaced by
- * the project's new curated collection:
+ * The deprecated `prfgame/CC_new` feed is dead. The app now reads its free
+ * configs EXCLUSIVELY from the project's new collection:
  *
- *   https://github.com/prfgame/CC_new
+ *   https://github.com/aptixzero/con_new
  *     ├─ configs_000.txt   (up to ~2200 mixed vless/vmess lines)
  *     ├─ configs_001.txt
  *     ├─ …
- *     └─ configs_NNN.txt   (3-digit zero-padded)
+ *     └─ configs_121.txt   (3-digit zero-padded, 122 files at v4.0)
  *
  * Discovery & resilience:
  *  • The file COUNT is discovered at runtime via the GitHub trees API and cached
@@ -41,20 +41,20 @@ object CcNewFeed {
 
     private const val TAG = "CcNewFeed"
 
-    const val REPO = "prfgame/CC_new"
+    const val REPO = "aptixzero/con_new"
     const val BRANCH = "main"
 
     /** Max candidate lines scanned per file (the feed publishes up to ~2200). */
     const val MAX_LINES_PER_FILE = 2200
 
     /**
-     * Live file count at the time of the v3.8 implementation, discovered via
-     *   GET https://api.github.com/repos/prfgame/CC_new/git/trees/main?recursive=1
-     * (configs_000.txt … configs_101.txt → 102 files). Used as a last-resort
+     * Live file count at the time of the v4.0 implementation, discovered via
+     *   GET https://api.github.com/repos/aptixzero/con_new/git/trees/main
+     * (configs_000.txt … configs_121.txt → 122 files). Used as a last-resort
      * fallback when the API is unreachable AND nothing is cached. NOT hardcoded
      * as the only source of truth — the live count is preferred and cached.
      */
-    const val FALLBACK_FILE_COUNT = 102
+    const val FALLBACK_FILE_COUNT = 122
 
     private const val PREFS = "cc_new_feed"
     private const val KEY_FILE_COUNT = "cc_new_file_count"
@@ -92,11 +92,11 @@ object CcNewFeed {
     /** Best-effort: count `configs_NNN.txt` entries in the repo tree. -1 on failure. */
     private fun discoverFileCount(): Int {
         return try {
-            val u = "https://api.github.com/repos/$REPO/git/trees/$BRANCH?recursive=1"
+            val u = "https://api.github.com/repos/$REPO/git/trees/$BRANCH"
             val conn = (URL(u).openConnection() as HttpURLConnection).apply {
                 connectTimeout = 5000; readTimeout = 6000
                 instanceFollowRedirects = true
-                setRequestProperty("User-Agent", "ProfessorVPN/3.8")
+                setRequestProperty("User-Agent", "ProfessorVPN/4.0")
                 setRequestProperty("Accept", "application/vnd.github+json")
             }
             if (conn.responseCode !in 200..299) return -1

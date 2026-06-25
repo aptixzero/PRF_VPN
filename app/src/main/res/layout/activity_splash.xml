@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Premium dark startup: pure black, centered white LOADING title, thin white
-     progress bar beneath. No matrix / binary / falling characters / noise. -->
+<!-- v4.0 splash (UI sheet screen 01): pure-black, glowing violet shield logo,
+     PROFESSOR VPN wordmark, "Secure · Fast · Unlimited" tagline, then a thin
+     violet progress bar. No matrix / binary / noise. -->
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
@@ -13,39 +14,57 @@
         android:gravity="center"
         android:paddingHorizontal="44dp">
 
-        <!-- centered white title — the loading glyph -->
+        <!-- glowing violet shield logo -->
+        <ImageView
+            android:id="@+id/splash_logo"
+            android:layout_width="128dp"
+            android:layout_height="128dp"
+            android:src="@drawable/splash_shield"
+            android:contentDescription="@string/app_name" />
+
+        <!-- wordmark (this is the boot_title that SplashActivity animates) -->
         <TextView
             android:id="@+id/boot_title"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="@string/splash_loading"
+            android:layout_marginTop="26dp"
+            android:text="@string/splash_brand"
             android:textColor="#FFFFFFFF"
-            android:textSize="40sp"
+            android:textSize="26sp"
             android:textStyle="bold"
-            android:letterSpacing="0.30"
-            android:shadowColor="#66FFFFFF"
-            android:shadowDx="0" android:shadowDy="0" android:shadowRadius="24"
-            android:fontFeatureSettings="liga 0" />
+            android:letterSpacing="0.22"
+            android:shadowColor="#998A3FFC"
+            android:shadowDx="0" android:shadowDy="0" android:shadowRadius="28" />
 
-        <!-- thin white progress bar -->
+        <!-- tagline -->
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:text="@string/splash_tagline"
+            android:textColor="@color/violet_bright"
+            android:textSize="12sp"
+            android:letterSpacing="0.20" />
+
+        <!-- thin violet progress bar -->
         <ProgressBar
             android:id="@+id/boot_progress"
             style="?android:attr/progressBarStyleHorizontal"
             android:layout_width="220dp"
-            android:layout_height="3dp"
-            android:layout_marginTop="34dp"
+            android:layout_height="4dp"
+            android:layout_marginTop="40dp"
             android:max="100"
             android:progress="0"
-            android:progressDrawable="@drawable/boot_progress" />
+            android:progressDrawable="@drawable/neon_progress" />
 
-        <!-- subtle status line (kept minimal, monochrome) -->
+        <!-- subtle status line -->
         <TextView
             android:id="@+id/boot_status"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_marginTop="16dp"
             android:text=""
-            android:textColor="#66FFFFFF"
+            android:textColor="#669089A8"
             android:textSize="11sp"
             android:letterSpacing="0.18" />
 

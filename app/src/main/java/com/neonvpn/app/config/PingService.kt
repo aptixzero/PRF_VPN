@@ -110,6 +110,13 @@ object PingService {
     fun statusOf(id: String): PingStatus = _statuses.value[id] ?: PingStatus.Idle
 
     /**
+     * v4.0 — allow an external driver (the AutoTestEngine) to push a status into
+     * the shared flow so the Free tab renders live spinners / results during an
+     * automatic test run, exactly as a manual PING ALL would.
+     */
+    fun setExternalStatus(id: String, status: PingStatus) = setStatus(id, status)
+
+    /**
      * Ping a SINGLE config immediately (the per-row PING button). Runs on the
      * app scope so a tab switch can't cancel it.
      */
