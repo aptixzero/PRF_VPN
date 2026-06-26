@@ -12,7 +12,7 @@ class ConfigStore(context: Context) {
     private val prefs = context.getSharedPreferences("neonvpn_prefs", Context.MODE_PRIVATE)
     private val gson = Gson()
 
-    fun getServers(): MutableList<ServerConfig> {
+    fun getServers(): MutableList<ServerConfig> = synchronized(LOCK) {
         val json = prefs.getString(KEY_SERVERS, null) ?: return mutableListOf()
         return try {
             val type = object : TypeToken<MutableList<ServerConfig>>() {}.type
@@ -22,13 +22,22 @@ class ConfigStore(context: Context) {
         }
     }
 
-    fun saveServers(list: List<ServerConfig>) {
-        prefs.edit().putString(KEY_SERVERS, gson.toJson(list)).apply()
+    fun saveServers(list: List<ServerConfig>) = synchronized(LOCK) {
+        // commit() (not apply()) so a burst of concurrent writers can't interleave
+        // and lose entries; the whole read-modify-write is guarded by LOCK.
+        prefs.edit().putString(KEY_SERVERS, gson.toJson(list)).commit()
     }
 
-    fun addServers(newOnes: List<ServerConfig>): Int {
+    /**
+     * Thread-safe additive merge. The ENTIRE read-modify-write is performed under
+     * [LOCK] so dozens of concurrent Auto-Test coroutines can each add their
+     * working config without clobbering each other (the old apply()/separate
+     * get()+save() pattern raced and silently dropped configs — and on some
+     * devices corrupted the prefs file, which is what crashed Auto Test).
+     */
+    fun addServers(newOnes: List<ServerConfig>): Int = synchronized(LOCK) {
         if (newOnes.isEmpty()) return 0
-        val current = getServers()
+        val current = getServersLocked()
 
         // Build the existing per-location counts + a fast dedup set so a paste of
         // many configs (which may contain 10+ clones of one server) never bloats
@@ -58,26 +67,41 @@ class ConfigStore(context: Context) {
             locationCounts[loc] = have + 1
             added++
         }
-        saveServers(current)
+        if (added > 0) saveServersLocked(current)
         return added
     }
 
-    fun removeServer(id: String) {
-        val current = getServers()
+    // Internal helpers used while already holding LOCK (avoid re-entrant sync).
+    private fun getServersLocked(): MutableList<ServerConfig> {
+        val json = prefs.getString(KEY_SERVERS, null) ?: return mutableListOf()
+        return try {
+            val type = object : TypeToken<MutableList<ServerConfig>>() {}.type
+            gson.fromJson(json, type) ?: mutableListOf()
+        } catch (_: Exception) {
+            mutableListOf()
+        }
+    }
+
+    private fun saveServersLocked(list: List<ServerConfig>) {
+        prefs.edit().putString(KEY_SERVERS, gson.toJson(list)).commit()
+    }
+
+    fun removeServer(id: String) = synchronized(LOCK) {
+        val current = getServersLocked()
         current.removeAll { it.id == id }
-        saveServers(current)
+        saveServersLocked(current)
         if (getSelectedId() == id) {
             setSelectedId(current.firstOrNull()?.id)
         }
     }
 
     /** Remove many configs at once (group delete). Returns count removed. */
-    fun removeServers(ids: Set<String>): Int {
+    fun removeServers(ids: Set<String>): Int = synchronized(LOCK) {
         if (ids.isEmpty()) return 0
-        val current = getServers()
+        val current = getServersLocked()
         val before = current.size
         current.removeAll { it.id in ids }
-        saveServers(current)
+        saveServersLocked(current)
         if (getSelectedId() in ids) {
             setSelectedId(current.firstOrNull()?.id)
         }
@@ -98,5 +122,9 @@ class ConfigStore(context: Context) {
     companion object {
         private const val KEY_SERVERS = "servers"
         private const val KEY_SELECTED = "selected_id"
+        // Process-wide monitor guarding every read-modify-write of the servers
+        // list. Shared by every ConfigStore instance (they all wrap the same
+        // SharedPreferences file) so concurrent writers serialise correctly.
+        private val LOCK = Any()
     }
 }

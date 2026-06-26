@@ -152,17 +152,27 @@ class FreeConfigsFragment : Fragment() {
             viewLifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {
                 PingService.statuses.collect { map ->
                     adapter.applyStatuses(map)
-                    if (adapter.items.isNotEmpty()) freeStore.replaceAll(adapter.items)
+                    // Persist the (re-sorted) order — but NOT while Auto Test is
+                    // running, because the engine owns the free store then and a
+                    // double-writer races (this was a crash source). Snapshot the
+                    // list defensively before handing it to the store.
+                    if (!AutoTestEngine.isRunning && adapter.items.isNotEmpty()) {
+                        freeStore.replaceAll(ArrayList(adapter.items))
+                    }
                 }
             }
         }
     }
+
+    /** Last time we did a (relatively expensive) full reload during Auto Test. */
+    @Volatile private var lastReloadAt = 0L
 
     /** v4.0 — reflect the continuous Auto-Test engine's progress in the UI. */
     private fun observeAutoTest() {
         viewLifecycleOwner.lifecycleScope.launch {
             viewLifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {
                 AutoTestEngine.progress.collect { p ->
+                    if (!isAdded) return@collect
                     if (p.running) {
                         btnAutoTest.text = getString(R.string.autotest_cancel)
                         showProgress(
@@ -170,8 +180,14 @@ class FreeConfigsFragment : Fragment() {
                             "${p.phase} · ${p.workingFound} working → My Configs"
                         )
                         // The engine appended fresh configs to the free store on disk;
-                        // reload them so the user sees the list churn live.
-                        reloadFromStore()
+                        // reload them so the user sees the list churn live — but THROTTLE
+                        // it (≤ every 700 ms) so we don't rebuild the RecyclerView on every
+                        // single status tick (that thrashing was a jank/crash risk).
+                        val now = System.currentTimeMillis()
+                        if (now - lastReloadAt >= 700L) {
+                            lastReloadAt = now
+                            reloadFromStore()
+                        }
                     } else {
                         if (btnAutoTest.text == getString(R.string.autotest_cancel)) {
                             btnAutoTest.text = getString(R.string.auto_test)
@@ -185,13 +201,18 @@ class FreeConfigsFragment : Fragment() {
     }
 
     private fun reloadFromStore() {
-        val fresh = freeStore.get()
-        adapter.items = fresh
-        seenKeys.clear()
-        fresh.forEach { seenKeys.add(ConfigParser.dedupKey(it)) }
-        adapter.applyStatuses(PingService.statuses.value)
-        refreshEmpty()
-        updateListHeader()
+        // Fully defensive: a store read / adapter swap during heavy Auto-Test
+        // churn must never bubble an exception onto the main thread.
+        runCatching {
+            if (!isAdded) return
+            val fresh = freeStore.get()
+            adapter.items = fresh
+            seenKeys.clear()
+            fresh.forEach { seenKeys.add(ConfigParser.dedupKey(it)) }
+            adapter.applyStatuses(PingService.statuses.value)
+            refreshEmpty()
+            updateListHeader()
+        }
     }
 
     // --------------------------------------------------------------- search
