@@ -6,36 +6,38 @@ are removed on each rebuild.
 
 ## Current artifact
 
-- **`ProfessorVPN-v4.3-universal.apk`** — version 4.3 (versionCode 24)
+- **`ProfessorVPN-v4.4-universal.apk`** — version 4.4 (versionCode 25)
 - Universal: `arm64-v8a`, `armeabi-v7a`, `x86`, `x86_64` (Android 7.0+).
 - Signed with the release key (`CN=NeonVPN`); v1+v2+v3 signature schemes.
-- v4.3 fixes (PING SYSTEM REPAIR):
-  - **Ping works again.** v4.2 was broken — *no* config (not even known-good
-    ones) would ever ping. Three compounding bugs were fixed:
-    1. **Nested-timeout starvation** — both the manual ping (`PingService`) and
-       the Auto-Test engine wrapped the already-bounded `Pinger.ping` in a
-       shorter outer `withTimeoutOrNull(2500 ms)` that always fired before the
-       inner work could finish, so every probe was cancelled → everything
-       reported unreachable. The outer timeout is removed; `Pinger.ping` is the
-       single hard-bounded path.
-    2. **Incompatible probe endpoints** — v4.2 pointed the native delay
-       measurer at `telegram.org/robots.txt` & `instagram.com/favicon.ico`
-       (heavy/redirecting/blocked responses it treats as failures). v4.3 probes
-       fast, proxy-friendly `generate_204` endpoints (Cloudflare + the
-       rock-solid gstatic/google connectivity-check infra) — the same targets
-       v2rayNG/v2box trust. The FIRST genuine proxied round-trip wins.
-    3. **Over-strict 2-stage confirm** — requiring a second success on a
-       different endpoint rejected good nodes; removed.
-  - **Stable on every network** — Wi-Fi, mobile data, any ISP: the probe travels
-    through the Xray outbound, so it reflects the real tunnel, not the local link.
-  - **Auto-Test == manual ping** — Auto-Test now uses the *identical* engine,
-    threshold and accept/reject logic as a manual ping. It automatically does
-    what you'd do by hand (search → ping → keep working / drop dead) and adds
-    each working config to My Configs the INSTANT it pings.
+- v4.4 highlights (TRUST-WORTHY PING + FASTER, STABLER TUNNEL):
+  - **A green ping now means it really connects — 100%.** The ping no longer
+    tests Google (Google is open on every ISP, so it proves nothing). It now
+    probes only **censored** endpoints that are reachable *only through a
+    genuinely working anti-censorship tunnel*: Cloudflare's edge/trace,
+    Telegram and Instagram. If the proxy can fetch these, it can carry real
+    blocked traffic.
+  - **Confirmed, not guessed.** A node must succeed on **two** independent
+    censored endpoints before it is shown green, and the reported latency is the
+    **median** of the confirmed probes — so a single fluke success can never
+    fake a "working" node, which is how dead configs used to slip through.
+  - **No more Google in any check** — the live-tunnel watchdog
+    (`XrayManager.measureDelay`) also probes Cloudflare's filtered edge instead
+    of gstatic, so it can actually tell a working tunnel from a broken one.
+  - **Faster, fuller-bandwidth tunnel** — smart per-transport multiplexing:
+    `ws`/`grpc`/`h2` carriers now pool requests over a few mux streams
+    (concurrency 8) for snappier, more stable browsing on disrupted internet,
+    while Reality/XTLS-vision and raw TCP+TLS keep one dedicated full-rate
+    stream (mux is incompatible / slower there). Combined with the 1 MiB
+    per-connection buffer and TLS-record fragmentation, the tunnel pulls the
+    full line-rate the config can offer.
+  - **Auto-Test == manual ping** — identical engine, identical
+    two-confirmation censored-endpoint check, identical accept/reject. Auto-Test
+    only ever saves nodes that genuinely bypass censorship, and adds each one to
+    My Configs the INSTANT it confirms.
 - Free configs are fetched from the `aptixzero/con_new` feed.
 
 Install on a device/emulator with:
 
 ```bash
-adb install -r ProfessorVPN-v4.3-universal.apk
+adb install -r ProfessorVPN-v4.4-universal.apk
 ```

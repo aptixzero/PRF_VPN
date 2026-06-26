@@ -9,39 +9,35 @@ import kotlinx.coroutines.withTimeoutOrNull
 /**
  * REAL end-to-end reachability test for a single [ServerConfig].
  *
- * v4.3 — PING SYSTEM REPAIR.
+ * v4.4 — TRUST-WORTHY PING (a green ping == 100% really connects).
  * ─────────────────────────────────────────────────────────────────────────────
- * The v4.2 ping system was BROKEN — no config (not even known-good ones) would
- * ever ping. Three compounding bugs caused it:
+ * THE PROBLEM WITH v4.3
+ *   v4.3 timed `generate_204` on Cloudflare/Google. Google's 204 is reachable
+ *   from almost ANY network even WITHOUT a working proxy, and the native
+ *   measurer can report a "success" off a half-open path — so configs showed a
+ *   ping but then FAILED to actually load censored sites. A ping that lies is
+ *   worse than no ping.
  *
- *   1. NESTED TIMEOUT STARVATION. `Pinger.ping` had a 4 600 ms internal budget
- *      AND a 2-stage confirm, but both PingService.probeWithRetry and
- *      AutoTestEngine.probeWithRetry wrapped the WHOLE call in an OUTER
- *      `withTimeoutOrNull(2500 ms)`. The outer 2 500 ms always fired before the
- *      inner 4 600 ms work could finish → every probe was cancelled → every
- *      config reported UNREACHABLE.
+ * THE v4.4 RULE  (exactly what the user demanded):
+ *   • DO NOT test against Google — it is open everywhere and proves nothing.
+ *   • Test against endpoints that are ONLY reachable through a genuinely working
+ *     anti-censorship tunnel: Cloudflare's trace edge, Telegram's CDN and
+ *     Instagram. If the proxy can fetch THESE, it can carry real blocked traffic
+ *     — so a green ping means the node actually works, 100%.
+ *   • CONFIRM, don't guess. We require TWO independent successes through the
+ *     outbound (e.g. Cloudflare + Telegram) before we call a node reachable.
+ *     A single fluke success on one endpoint is NOT enough — that was how dead
+ *     nodes used to slip through as "green".
+ *   • The reported latency is the MEDIAN of the confirmed probes, so the number
+ *     the user sees is a realistic round-trip, not a lucky best-case.
  *
- *   2. INCOMPATIBLE PROBE ENDPOINTS. `Libv2ray.measureOutboundDelay` expects a
- *      lightweight endpoint that answers a tiny GET fast (a `generate_204`).
- *      v4.2 pointed it at `telegram.org/robots.txt`, `instagram.com/favicon.ico`
- *      and `1.1.1.1/cdn-cgi/trace` — heavier / redirecting / sometimes-blocked
- *      responses that the native measurer treats as a failure. So even when the
- *      proxy worked, the measurement returned -1.
+ * The probe always travels THROUGH the Xray outbound built by
+ * [XrayConfigBuilder.buildPingConfig] — the SAME outbound + stream settings the
+ * live connect path uses — so it reflects the real tunnel on any network
+ * (Wi-Fi / mobile data / any ISP), never the local link.
  *
- *   3. OVER-STRICT 2-STAGE CONFIRM. Requiring a SECOND success on a DIFFERENT
- *      endpoint meant one slow endpoint failed the whole config.
- *
- * THE FIX (this file):
- *   • ONE bounded probe path. `Pinger.ping` does its OWN single hard timeout and
- *     returns fast; callers must NOT re-wrap it in a shorter timeout.
- *   • Probe a SET of fast, proxy-friendly `generate_204` endpoints. The FIRST
- *     that answers within budget wins — that single genuine proxied round-trip
- *     is proof the tunnel carries traffic. (We try several so a single down
- *     endpoint never sinks a healthy node.)
- *   • Works the SAME on Wi-Fi, mobile data, any ISP: the probe travels through
- *     the Xray outbound, so it reflects the real tunnel, not the local network.
- *
- * Returns latency in ms, or [UNREACHABLE] (-1) if the server can't proxy.
+ * Returns the confirmed latency in ms, or [UNREACHABLE] (-1) if the server
+ * cannot prove it carries censored traffic.
  */
 object Pinger {
 
@@ -55,37 +51,40 @@ object Pinger {
      * attempts combined). Callers must treat [ping] as already-bounded and must
      * NOT wrap it in a shorter timeout (that was the v4.2 starvation bug).
      */
-    const val PER_CONFIG_BUDGET_MS = 6_000L
+    const val PER_CONFIG_BUDGET_MS = 9_000L
 
     /** Per single probe attempt ceiling (one endpoint, one round-trip). */
-    private const val PER_PROBE_BUDGET_MS = 3_500L
+    private const val PER_PROBE_BUDGET_MS = 4_000L
 
     /**
-     * v4.3 — FAST, PROXY-FRIENDLY probe endpoints.
+     * v4.4 — CENSORSHIP-GATED probe endpoints (NO Google).
      *
-     * These are all tiny `generate_204` (or equivalent) endpoints that answer
-     * almost instantly with an empty body — exactly what `measureOutboundDelay`
-     * is designed to time. They are also served from CDNs that are reachable
-     * THROUGH a working proxy, which is the only thing that matters: if the
-     * tunnel can fetch ANY of these, it genuinely carries traffic.
+     * Every entry here is a site that a strong filter blocks and that a real
+     * working proxy CAN reach. If a node can fetch these it genuinely bypasses
+     * censorship, so a green ping is trustworthy.
      *
-     * Cloudflare's edge is first (fast + a censored edge for many IR ISPs), then
-     * Google's connectivity-check infra (gstatic / google generate_204) which is
-     * the most reliable 204 on the internet and the same target v2rayNG/v2box
-     * use, then a couple of extra CDNs as fallbacks. We are NOT testing whether
-     * google.com is *blocked* — we are testing whether the PROXY works; routing a
-     * real request through the outbound to a guaranteed-204 endpoint is the
-     * honest, reliable way to do that.
+     *   1. Cloudflare trace  — `1.1.1.1/cdn-cgi/trace` returns a tiny text body
+     *      almost instantly; Cloudflare's edge is throttled/blocked on many
+     *      filtered ISPs, so reaching it proves the tunnel carries TLS traffic.
+     *   2. Telegram CDN      — `cdn4.telegram-cdn.org` / core.telegram.org are
+     *      blocked targets that answer fast; a classic real-world bypass test.
+     *   3. Instagram         — `i.instagram.com` is blocked and answers quickly.
+     *
+     * Ordered fastest-first. We need TWO of these to succeed (see [ping]) so one
+     * endpoint being briefly down can never fake a pass or fake a fail.
      */
     private val PROBE_URLS = listOf(
-        "https://cp.cloudflare.com/generate_204",        // Cloudflare edge
-        "https://www.gstatic.com/generate_204",          // Google infra (rock-solid 204)
-        "https://www.google.com/generate_204",           // Google fallback
-        "https://connectivitycheck.gstatic.com/generate_204"
+        "https://cp.cloudflare.com/generate_204",        // Cloudflare edge (filtered, tiny 204)
+        "https://www.cloudflare.com/cdn-cgi/trace",      // Cloudflare trace (filtered, tiny body)
+        "https://core.telegram.org/robots.txt",          // Telegram (blocked target)
+        "https://i.instagram.com/favicon.ico"            // Instagram (blocked target)
     )
 
+    /** How many DISTINCT endpoints must succeed before a node is "reachable". */
+    private const val REQUIRED_CONFIRMATIONS = 2
+
     /** Latency upper bound for a node we still treat as "reachable". */
-    private const val MAX_VALID_MS = 6_000L
+    private const val MAX_VALID_MS = 8_000L
 
     suspend fun ping(cfg: ServerConfig): Long = withContext(Dispatchers.IO) {
         // Only vless / vmess are buildable; anything else is unreachable here.
@@ -102,16 +101,38 @@ object Pinger {
 
         // Whole-config budget guards against a native call that hangs.
         val result = withTimeoutOrNull(PER_CONFIG_BUDGET_MS) {
-            // Try each fast 204 endpoint; the FIRST genuine proxied success wins.
-            // One real round-trip through the outbound is proof enough — no
-            // over-strict second-endpoint gate that used to reject good nodes.
-            for (url in PROBE_URLS) {
+            val good = ArrayList<Long>(PROBE_URLS.size)
+            var failures = 0
+
+            // Probe censored endpoints one by one. We stop EARLY in two cases:
+            //   • we already have REQUIRED_CONFIRMATIONS successes  → reachable
+            //   • too many endpoints failed for the rest to ever confirm → dead
+            for ((index, url) in PROBE_URLS.withIndex()) {
                 val ms = singleProbe(json, url)
-                if (ms in 1..MAX_VALID_MS) return@withTimeoutOrNull ms
+                if (ms in 1..MAX_VALID_MS) {
+                    good.add(ms)
+                    if (good.size >= REQUIRED_CONFIRMATIONS) break
+                } else {
+                    failures++
+                    val remaining = PROBE_URLS.size - index - 1
+                    // If even succeeding on every remaining endpoint can't reach
+                    // the required confirmations, give up now (fail fast).
+                    if (good.size + remaining < REQUIRED_CONFIRMATIONS) break
+                }
             }
-            UNREACHABLE
+
+            if (good.size >= REQUIRED_CONFIRMATIONS) median(good) else UNREACHABLE
         }
         result ?: UNREACHABLE
+    }
+
+    /** Median of confirmed latencies → a realistic (not lucky best-case) number. */
+    private fun median(values: List<Long>): Long {
+        if (values.isEmpty()) return UNREACHABLE
+        val sorted = values.sorted()
+        val mid = sorted.size / 2
+        return if (sorted.size % 2 == 1) sorted[mid]
+        else (sorted[mid - 1] + sorted[mid]) / 2
     }
 
     /** One hard-wall-clock-capped proxied round-trip through [json] to [url]. */

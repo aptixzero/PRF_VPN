@@ -84,13 +84,15 @@ object AutoTestEngine {
         (cores + 2).coerceIn(4, 10)
     }
     /**
-     * v4.3 — a node is "working" if its confirmed latency is at or below this.
-     * Raised so Auto Test accepts EXACTLY what a manual ping accepts (anything
-     * Pinger reports reachable, up to its own MAX_VALID_MS). The whole point:
-     * Auto Test must behave IDENTICALLY to a manual ping — same engine, same
-     * threshold, same accept/reject decision.
+     * v4.4 — a node is "working" if its confirmed latency is at or below this.
+     * Matches Pinger's own MAX_VALID_MS so Auto Test accepts EXACTLY what a
+     * manual ping accepts. The whole point: Auto Test must behave IDENTICALLY to
+     * a manual ping — same engine, same censored-endpoint confirmation, same
+     * threshold, same accept/reject decision. Since Pinger now requires TWO
+     * censored-endpoint confirmations, anything it reports reachable is a node
+     * that genuinely bypasses censorship, so Auto Test only ever saves real ones.
      */
-    private const val WORKING_MAX_MS = 6_000L
+    private const val WORKING_MAX_MS = 8_000L
 
     data class Progress(
         val running: Boolean = false,

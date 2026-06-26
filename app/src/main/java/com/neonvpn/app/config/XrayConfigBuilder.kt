@@ -261,15 +261,7 @@ object XrayConfigBuilder {
             })
         })
         out.put("streamSettings", buildStreamSettings(cfg))
-
-        // Mux OFF for VLESS: Reality/XTLS-vision are incompatible with mux, and
-        // even on plain TLS, dedicating one proxied TCP stream per app connection
-        // gives full single-stream bandwidth with no head-of-line blocking — the
-        // fastest possible path for big downloads. (-1 = disabled.)
-        out.put("mux", JSONObject().apply {
-            put("enabled", false)
-            put("concurrency", -1)
-        })
+        applyMux(out, cfg)
         return out
     }
 
@@ -304,12 +296,42 @@ object XrayConfigBuilder {
             })
         })
         out.put("streamSettings", buildStreamSettings(cfg))
-
-        out.put("mux", JSONObject().apply {
-            put("enabled", false)
-            put("concurrency", -1)
-        })
+        applyMux(out, cfg)
         return out
+    }
+
+    /**
+     * v4.4 — SMART multiplexing for max throughput + stability.
+     *
+     * The right mux setting depends on the transport:
+     *   • Reality / XTLS-vision flow → mux is INCOMPATIBLE and would break the
+     *     connection, so it MUST stay off.
+     *   • Raw TCP+TLS → one dedicated stream per app socket already gives full
+     *     single-stream line-rate with zero head-of-line blocking, so off is the
+     *     fastest for big downloads.
+     *   • ws / grpc / h2 → these run over a single long-lived connection where
+     *     opening a fresh handshake per request is slow and fragile on Iran's
+     *     disrupted internet. Mux pools many app requests onto a few carrier
+     *     streams, which is noticeably FASTER and far MORE STABLE here — pages
+     *     and apps stop stalling while a new sub-connection is negotiated.
+     */
+    private fun applyMux(out: JSONObject, cfg: ServerConfig) {
+        val net = cfg.network.ifBlank { "tcp" }.lowercase()
+        val isReality = cfg.tls.equals("reality", true) || cfg.tls.equals("xtls", true)
+        val hasFlow = cfg.flow.isNotBlank()
+        val muxFriendly = net in setOf("ws", "grpc", "h2", "http")
+        val enable = muxFriendly && !isReality && !hasFlow
+        out.put("mux", JSONObject().apply {
+            put("enabled", enable)
+            // 8 concurrent sub-streams per carrier connection is the v2rayNG
+            // sweet-spot: enough parallelism for snappy browsing without the
+            // overhead of too many open streams. (-1 = disabled when off.)
+            put("concurrency", if (enable) 8 else -1)
+            if (enable) {
+                put("xudpConcurrency", 8)
+                put("xudpProxyUDP443", "reject")
+            }
+        })
     }
 
     private fun buildStreamSettings(cfg: ServerConfig): JSONObject {
