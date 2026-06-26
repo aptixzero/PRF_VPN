@@ -48,14 +48,35 @@ class CrashHandler private constructor(
         }
 
         // Threads we know how to survive: keep the process alive so the user's
-        // app/UI doesn't die from a background connection hiccup.
-        val survivable = t.name in SURVIVABLE_THREADS ||
-            t.name.startsWith("vpn-") ||
-            t.name.startsWith("tun2socks") ||
-            t.name.startsWith("stats") ||
-            t.name.startsWith("watchdog") ||
-            t.name.startsWith("DefaultDispatcher") ||
-            t.name.startsWith("pool-")
+        // app/UI doesn't die from a background connection / test hiccup. v4.2
+        // widens this net so EVERY background worker (coroutine dispatchers,
+        // OkHttp, the Auto-Test engine, ping sweeps, timers, GL/animation
+        // threads, etc.) is swallowed — the process only ever dies from a true
+        // main-thread crash, which we then recover from by relaunching.
+        val name = t.name
+        val survivable = name in SURVIVABLE_THREADS ||
+            name.startsWith("vpn-") ||
+            name.startsWith("tun2socks") ||
+            name.startsWith("stats") ||
+            name.startsWith("watchdog") ||
+            name.startsWith("DefaultDispatcher") ||
+            name.startsWith("Default Dispatcher") ||
+            name.startsWith("kotlinx.coroutines") ||
+            name.startsWith("pool-") ||
+            name.startsWith("OkHttp") ||
+            name.startsWith("Okio") ||
+            name.startsWith("AsyncTask") ||
+            name.startsWith("Thread-") ||
+            name.startsWith("GLThread") ||
+            name.startsWith("RenderThread") ||
+            name.startsWith("queued-work") ||
+            name.startsWith("Timer-") ||
+            name.contains("Worker", ignoreCase = true) ||
+            name.contains("ping", ignoreCase = true) ||
+            name.contains("autotest", ignoreCase = true) ||
+            // Catch-all: any thread that is NOT the main/UI thread is safe to
+            // swallow — a background crash must never take the whole app down.
+            !isMainThread(t)
 
         if (survivable) {
             Log.w(TAG, "swallowed crash on survivable thread '${t.name}' — process kept alive")
@@ -146,6 +167,15 @@ class CrashHandler private constructor(
         s = IPV6_RX.replace(s, "[redacted-ip6]")
         s = HOSTPORT_RX.replace(s, "[redacted-host]")
         return s
+    }
+
+    /** True only for the app's main/UI (Looper) thread. */
+    private fun isMainThread(t: Thread): Boolean = try {
+        t === android.os.Looper.getMainLooper().thread
+    } catch (_: Throwable) {
+        // If we can't tell, err on the side of treating it as main so we don't
+        // accidentally swallow a real UI crash without the recovery relaunch.
+        t.id == 1L
     }
 
     companion object {

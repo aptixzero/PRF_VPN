@@ -73,13 +73,21 @@ object AutoTestEngine {
     /** How many configs we fetch + test per cycle. */
     const val BATCH = 120
 
-    /** Concurrent probes while testing a batch (brief: 5–8 simultaneously). */
-    private const val MAX_CONCURRENCY = 8
+    /**
+     * v4.2 — ADAPTIVE concurrency. On a strong phone we run more probes in
+     * parallel (fast Auto Test); on a weak / low-core device we throttle right
+     * down so the test never overwhelms RAM/CPU and crashes. Derived once from
+     * the number of CPU cores: 2 cores → 4, 4 cores → 6, 8+ cores → 10.
+     */
+    private val MAX_CONCURRENCY: Int by lazy {
+        val cores = Runtime.getRuntime().availableProcessors().coerceAtLeast(1)
+        (cores + 2).coerceIn(4, 10)
+    }
     private const val PRIMARY_TIMEOUT_MS = 2_500L
     private const val RETRY_TIMEOUT_MS = 1_500L
 
     /** A node is "working" if its confirmed latency is at or below this. */
-    private const val WORKING_MAX_MS = 1_500L
+    private const val WORKING_MAX_MS = 1_800L
 
     data class Progress(
         val running: Boolean = false,
@@ -132,6 +140,9 @@ object AutoTestEngine {
         val appCtx = ctx.applicationContext
         val freeStore = FreeConfigStore(appCtx)
         val myStore = ConfigStore(appCtx)
+
+        // v4.2 — immediately raise the top-of-screen "Auto Test is ON" banner.
+        runCatching { AutoTestNotifier.show(appCtx, "در حال تست خودکار کانفیگ‌ها…") }
 
         // SupervisorJob + crashGuard => the loop survives any single failure.
         job = engineScope.launch(SupervisorJob() + Dispatchers.Default + crashGuard) {
@@ -206,11 +217,22 @@ object AutoTestEngine {
                                         PingService.setExternalStatus(
                                             cfg.id, PingService.PingStatus.Reachable(ms)
                                         )
-                                        // queue working config; persisted in bulk below
+                                        // v4.2 — INSTANT add: the moment a config
+                                        // pings, push it straight into My Configs.
+                                        // We don't wait for the batch/list to finish
+                                        // (FLUSH_EVERY=1 below also flushes the queue
+                                        // immediately) so the user sees working
+                                        // configs appear live, one by one.
                                         workingThisBatch.add(cfg.copy())
                                         val total = totalWorking.incrementAndGet()
                                         updateProgress {
                                             it.copy(workingFound = total, lastWorkingMs = ms)
+                                        }
+                                        runCatching {
+                                            AutoTestNotifier.show(
+                                                appCtx,
+                                                "اتو تست روشن است · $total کانفیگ سالم اضافه شد"
+                                            )
                                         }
                                     } else {
                                         PingService.setExternalStatus(
@@ -265,6 +287,8 @@ object AutoTestEngine {
         }
         job?.invokeOnCompletion {
             updateProgress { it.copy(running = false, phase = "Stopped") }
+            // Ensure the banner never lingers if the loop ends for any reason.
+            runCatching { AutoTestNotifier.clear(appCtx) }
         }
     }
 
@@ -273,10 +297,18 @@ object AutoTestEngine {
         job?.cancel()
         job = null
         updateProgress { it.copy(running = false, phase = "Stopped") }
+        // v4.2 — drop the "Auto Test is ON" banner the moment the user cancels.
+        runCatching {
+            com.neonvpn.app.NeonApp.instance.let { AutoTestNotifier.clear(it) }
+        }
     }
 
-    /** How many working configs to accumulate before flushing to My Configs. */
-    private const val FLUSH_EVERY = 3
+    /**
+     * v4.2 — flush working configs to My Configs the INSTANT each one pings
+     * (per the brief: "as soon as a config gives a ping, add it immediately —
+     * don't wait for the list to finish, whether it's 1 config or 120").
+     */
+    private const val FLUSH_EVERY = 1
 
     /** Drain queued working configs into My Configs in one guarded write. */
     private suspend fun flushWorking(

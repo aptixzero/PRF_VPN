@@ -134,8 +134,10 @@ class XrayManager(private val context: Context) {
     @Volatile private var totalUp = 0L
     @Volatile private var totalDown = 0L
 
-    /** Round-trip delay test through the running core (ms), -1 on error. */
-    fun measureDelay(url: String = "https://www.gstatic.com/generate_204"): Long {
+    /** Round-trip delay test through the running core (ms), -1 on error.
+     *  v4.2 — probes a FILTERED edge (Cloudflare) rather than google.com so the
+     *  health check truly reflects whether the tunnel unblocks censored sites. */
+    fun measureDelay(url: String = "https://cp.cloudflare.com/generate_204"): Long {
         return try {
             controller?.measureDelay(url) ?: -1
         } catch (_: Throwable) {
@@ -171,7 +173,7 @@ class XrayManager(private val context: Context) {
          * Builds a minimal full config that routes through the given outbound and
          * times a request to a generate_204 endpoint.
          */
-        fun measureConfigDelay(configJson: String, url: String = "https://www.gstatic.com/generate_204"): Long {
+        fun measureConfigDelay(configJson: String, url: String = "https://cp.cloudflare.com/generate_204"): Long {
             return try {
                 Libv2ray.measureOutboundDelay(configJson, url)
             } catch (e: Throwable) {

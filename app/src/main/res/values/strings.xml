@@ -84,6 +84,7 @@
     <string name="autotest_done">Auto-Test complete · %1$d working configs ready</string>
     <string name="autotest_none">No working configs found. Try again.</string>
     <string name="autotest_stop">STOP</string>
+    <string name="autotest_notif_title">Auto Test روشن است</string>
 
     <!-- ===== Hamburger menu / drawer ===== -->
     <string name="menu">Menu</string>

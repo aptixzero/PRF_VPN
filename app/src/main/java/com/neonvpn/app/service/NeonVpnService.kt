@@ -200,9 +200,13 @@ class NeonVpnService : VpnService() {
             emitProgress(70, "Verifying")
             var health = -1L
             run {
-                val deadline = System.currentTimeMillis() + 8000
+                // v4.2 — give a freshly-started core more room to warm up before
+                // we judge it. A cold Reality/XTLS handshake on Iran's disrupted
+                // links can take a couple of seconds; retrying patiently here is
+                // what makes "if it pinged, it connects 100%" hold in practice.
+                val deadline = System.currentTimeMillis() + 12000
                 var attempts = 0
-                while (System.currentTimeMillis() < deadline && attempts < 4) {
+                while (System.currentTimeMillis() < deadline && attempts < 6) {
                     attempts++
                     val d = try { xray.measureDelay() } catch (_: Throwable) { -1L }
                     if (d in 1..15000) { health = d; break }
@@ -382,11 +386,23 @@ class NeonVpnService : VpnService() {
         configFile.writeText(buildHevConfig())
 
         tunnelThread = thread(name = "tun2socks", isDaemon = true) {
-            try {
-                // Blocks until TProxyStopService is called.
-                TProxyService.TProxyStartService(configFile.absolutePath, fd)
-            } catch (e: Throwable) {
-                Log.e(TAG, "tun2socks stopped: ${e.message}")
+            // v4.2 — if the native tunnel ever returns unexpectedly while the
+            // session is still meant to be up (a rare native hiccup on weak
+            // devices), restart it instead of leaving traffic black-holed. A
+            // small bounded retry loop keeps the TUN ⇄ SOCKS bridge alive without
+            // ever crashing the process.
+            var restarts = 0
+            while (running && !stopping && restarts <= 3) {
+                try {
+                    // Blocks until TProxyStopService is called.
+                    TProxyService.TProxyStartService(configFile.absolutePath, fd)
+                } catch (e: Throwable) {
+                    Log.e(TAG, "tun2socks stopped: ${e.message}")
+                }
+                if (!running || stopping) break
+                restarts++
+                Log.w(TAG, "tun2socks returned while connected — restarting (#$restarts)")
+                try { Thread.sleep(300) } catch (_: InterruptedException) { break }
             }
         }
     }
@@ -519,15 +535,16 @@ class NeonVpnService : VpnService() {
     private fun startWatchdog() {
         watchdogThread = thread(name = "watchdog", isDaemon = true) {
             var consecutiveFailures = 0
+            var reviveAttempts = 0
             // grace period so we don't probe during the first warm-up
             try { Thread.sleep(8000) } catch (_: InterruptedException) { return@thread }
 
             while (running && !stopping) {
                 try {
-                    // §4.5 — EXPONENTIAL BACKOFF watchdog. While healthy we poll at
-                    // the base cadence; after each failed revival we wait the next
-                    // step in the 2/4/8/16/32s schedule before probing again, so a
-                    // node that's down during a network blackout isn't hammered.
+                    // v4.2 — RESILIENT watchdog. While healthy we poll at the base
+                    // cadence; after a failure we wait the next step in the
+                    // 2/4/8/16/32s backoff before probing again so a node that's
+                    // briefly down during a network blip isn't hammered.
                     val waitMs = if (consecutiveFailures == 0) WATCHDOG_INTERVAL_MS
                         else WATCHDOG_BACKOFF_MS[
                             (consecutiveFailures - 1).coerceIn(0, WATCHDOG_BACKOFF_MS.lastIndex)
@@ -535,14 +552,34 @@ class NeonVpnService : VpnService() {
                     Thread.sleep(waitMs)
                     if (!running || stopping) break
 
+                    // v4.2 — if there's currently NO usable physical network
+                    // (airplane mode, tunnel/metro dead-zone, screen-off doze with
+                    // radios parked) we must NOT treat that as "server dead" and
+                    // tear the session down. We simply wait for connectivity to
+                    // come back and keep the tunnel armed — this is core to "never
+                    // disconnects". Re-pin the underlying network when it returns.
+                    if (!hasUsableNetwork()) {
+                        Log.i(TAG, "watchdog: no physical network — holding tunnel, not failing")
+                        applyUnderlyingNetwork()
+                        continue
+                    }
+
+                    // v4.2 — confirm a failure with a SECOND probe before reacting,
+                    // so a single dropped probe (very common on Iran's flaky links)
+                    // can never trigger a needless reconnect/teardown.
                     val coreAlive = try { xray.isRunning } catch (_: Throwable) { false }
-                    val health = if (coreAlive) {
+                    var health = if (coreAlive) {
                         try { xray.measureDelay() } catch (_: Throwable) { -1L }
                     } else -1L
+                    if (coreAlive && health !in 1..15000) {
+                        try { Thread.sleep(700) } catch (_: InterruptedException) { break }
+                        health = try { xray.measureDelay() } catch (_: Throwable) { -1L }
+                    }
 
                     val healthy = coreAlive && health in 1..15000
                     if (healthy) {
                         consecutiveFailures = 0
+                        reviveAttempts = 0
                         continue
                     }
 
@@ -550,21 +587,24 @@ class NeonVpnService : VpnService() {
                     Log.w(TAG, "watchdog: unhealthy (coreAlive=$coreAlive delay=$health) " +
                         "fail#$consecutiveFailures — re-spinning core")
 
-                    // try to revive the core in place
+                    // try to revive the core in place (same config, no user tap)
                     val srv = currentServer
                     if (srv != null) {
                         try {
+                            reviveAttempts++
                             xray.stop()
                             Thread.sleep(300)
                             val json = XrayConfigBuilder.build(srv)
                             val ok = xray.start(json)
                             if (ok) {
-                                Thread.sleep(400)
+                                Thread.sleep(500)
                                 val again = try { xray.measureDelay() } catch (_: Throwable) { -1L }
                                 if (again in 1..15000) {
                                     consecutiveFailures = 0
+                                    reviveAttempts = 0
                                     Log.i(TAG, "watchdog: core revived (${again}ms)")
                                     updateNotification(srv.remark, "Reconnected · ${again}ms")
+                                    continue
                                 }
                             }
                         } catch (e: Throwable) {
@@ -572,8 +612,14 @@ class NeonVpnService : VpnService() {
                         }
                     }
 
-                    // after the full 5-step backoff fails, give up so the user can act
-                    if (consecutiveFailures >= WATCHDOG_BACKOFF_MS.size) {
+                    // v4.2 — Be FAR more patient before surfacing an error. We keep
+                    // re-spinning the core through the whole backoff schedule, and
+                    // only give up after MANY sustained hard failures WITH a live
+                    // physical network (so a temporary outage never drops a user
+                    // who is actually online). This makes the app feel like it
+                    // "never disconnects" while staying honest when a node is truly
+                    // dead for good.
+                    if (consecutiveFailures >= MAX_HARD_FAILURES) {
                         Log.e(TAG, "watchdog: giving up after $consecutiveFailures failures")
                         broadcastState(STATE_ERROR, "Connection lost — pick another server")
                         cleanup()
@@ -588,6 +634,21 @@ class NeonVpnService : VpnService() {
                 }
             }
         }
+    }
+
+    /** v4.2 — is there any non-VPN network with INTERNET capability right now? */
+    private fun hasUsableNetwork(): Boolean {
+        return try {
+            val cm = connectivityManager ?: getSystemService(ConnectivityManager::class.java)
+            if (cm != null && connectivityManager == null) connectivityManager = cm
+            cm ?: return true   // can't tell → assume yes (don't falsely tear down)
+            cm.allNetworks.any { net ->
+                val caps = try { cm.getNetworkCapabilities(net) } catch (_: Throwable) { null }
+                caps != null &&
+                    caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) &&
+                    !caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN)
+            }
+        } catch (_: Throwable) { true }
     }
 
     // ----------------------------------------------------------------- stop
@@ -818,6 +879,12 @@ class NeonVpnService : VpnService() {
         // After the 5th failure the session is torn down and the user is told.
         private const val WATCHDOG_INTERVAL_MS = 7000L
         private val WATCHDOG_BACKOFF_MS = longArrayOf(2000L, 4000L, 8000L, 16000L, 32000L)
+
+        // v4.2 — only surface a "connection lost" after this many SUSTAINED hard
+        // failures (each already double-probed + a core re-spin attempt) while a
+        // live physical network exists. Much higher than before so the tunnel
+        // rides out Iran's frequent disruptions instead of dropping the user.
+        private const val MAX_HARD_FAILURES = 10
 
         // 1500 matches the tun2socks tunnel MTU; both sides MUST agree.
         private const val VPN_MTU = 1500

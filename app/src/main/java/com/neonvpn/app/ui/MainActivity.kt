@@ -69,6 +69,22 @@ class MainActivity : BaseActivity() {
         } catch (e: Throwable) {
             android.util.Log.e("MainActivity", "setup failed: ${e.message}", e)
         }
+        // v4.2 — politely request notification permission on Android 13+ so the
+        // VPN status + the "Auto Test is ON" banner can actually appear. Fully
+        // guarded: a denial just means no banner, never a crash.
+        try { maybeRequestNotificationPermission() } catch (_: Throwable) {}
+    }
+
+    private fun maybeRequestNotificationPermission() {
+        if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.TIRAMISU) return
+        val perm = android.Manifest.permission.POST_NOTIFICATIONS
+        val granted = androidx.core.content.ContextCompat.checkSelfPermission(this, perm) ==
+            android.content.pm.PackageManager.PERMISSION_GRANTED
+        if (!granted) {
+            runCatching {
+                androidx.core.app.ActivityCompat.requestPermissions(this, arrayOf(perm), 9701)
+            }
+        }
     }
 
     private fun setupUi(savedInstanceState: Bundle?) {

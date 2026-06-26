@@ -81,6 +81,7 @@
     <string name="autotest_done">تست خودکار کامل شد · %1$d کانفیگ سالم آماده است</string>
     <string name="autotest_none">کانفیگ سالمی پیدا نشد. دوباره تلاش کنید.</string>
     <string name="autotest_stop">توقف</string>
+    <string name="autotest_notif_title">Auto Test روشن است</string>
 
     <!-- ===== Hamburger menu / drawer ===== -->
     <string name="menu">منو</string>

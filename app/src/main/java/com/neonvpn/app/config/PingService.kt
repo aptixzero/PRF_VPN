@@ -45,7 +45,16 @@ import kotlinx.coroutines.withTimeoutOrNull
  */
 object PingService {
 
-    const val MAX_CONCURRENCY = 16
+    /**
+     * v4.2 — ADAPTIVE concurrency so PING ALL stays fast on strong phones yet
+     * never floods a weak / low-core device with thousands of simultaneous
+     * sockets (a crash source on cheap hardware). Scaled from CPU cores:
+     * 2 cores → 6, 4 cores → 10, 8+ cores → 16.
+     */
+    val MAX_CONCURRENCY: Int by lazy {
+        val cores = Runtime.getRuntime().availableProcessors().coerceAtLeast(1)
+        (cores * 2).coerceIn(6, 16)
+    }
     const val PRIMARY_TIMEOUT_MS = 2_500L
     const val RETRY_TIMEOUT_MS = 1_500L
     const val BACKOFF_MS = 4_000L

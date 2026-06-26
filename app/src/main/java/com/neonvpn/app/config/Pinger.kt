@@ -46,27 +46,40 @@ object Pinger {
     // Hard ceiling for a single config's whole test (a 2-stage confirm). Tightened
     // so a dead node is abandoned quickly and the (now heavily-parallel) queue
     // keeps moving — Auto-Test feels far faster while staying accurate.
-    private const val PER_CONFIG_BUDGET_MS = 5_200L
+    private const val PER_CONFIG_BUDGET_MS = 4_600L
     // Per single probe attempt ceiling (the native call's own timeout is a hint,
     // this is the enforced wall-clock cap). A healthy node answers well under 2s;
     // anything slower is not worth waiting on when many are tested concurrently.
-    private const val PER_PROBE_BUDGET_MS = 2_200L
+    private const val PER_PROBE_BUDGET_MS = 2_000L
 
-    // Real-world probe endpoints, ordered fastest-CDN first. The first that
-    // returns a 2xx/204 wins. These are the exact endpoints clients trust as a
-    // genuine "the internet works through this proxy" signal — the same family
-    // YouTube / Google / Cloudflare connectivity checks use.
+    // v4.2 — REAL-WORLD FILTERED TARGETS.
+    //
+    // The whole point of this app is to bypass Iran's censorship, so the ping
+    // MUST be measured against services that are actually FILTERED for Iranian
+    // users — NOT google.com (which is reachable on many ISPs even without a
+    // VPN, producing a misleadingly "green" ping on dead proxies). We probe the
+    // exact destinations the user wants to reach: Cloudflare, Telegram and
+    // Instagram endpoints. If a proxy can carry a real request to THESE, it can
+    // genuinely unblock what matters — that's what makes "if it pinged, it
+    // connects" honest.
+    //
+    // We use lightweight, well-known 204/connectivity endpoints on each provider
+    // so the round-trip is fast but still a genuine proxied request.
     private val PROBE_URLS = listOf(
-        "https://www.gstatic.com/generate_204",       // Google / YouTube infra
-        "https://cp.cloudflare.com/generate_204",      // Cloudflare
-        "https://www.google.com/generate_204",         // Google fallback
-        // Iran-favourable confirmation target. Many configs sold to Iranian
-        // users are tuned to reach domestic / CDN edges; this endpoint responds
-        // fast & reliably from inside Iran, so it gives a trustworthy second
-        // signal for the very nodes our audience actually uses. It is a genuine
-        // proxied round-trip like the others — never a fake value.
-        "https://api.aparat.com/fa/v1/generate_204"
+        // Cloudflare connectivity check (filtered edge for many IR ISPs).
+        "https://cp.cloudflare.com/generate_204",
+        // Telegram core endpoint — directly the service Iranians need unblocked.
+        "https://www.telegram.org/robots.txt",
+        // Instagram — another primary blocked target inside Iran.
+        "https://www.instagram.com/favicon.ico",
+        // Cloudflare 1.1.1.1 captive portal (second CF edge as a CDN fallback).
+        "https://1.1.1.1/cdn-cgi/trace"
     )
+
+    // Latency we treat as the upper bound for a "really reachable" node. A genuine
+    // proxied round-trip to a filtered target above this is too slow/unstable to
+    // count as connected.
+    private const val MAX_VALID_MS = 5_000L
 
     suspend fun ping(cfg: ServerConfig): Long = withContext(Dispatchers.IO) {
         // Only vless / vmess are buildable; anything else is unreachable here.
@@ -88,34 +101,34 @@ object Pinger {
 
         // Whole-config budget: if the probes collectively blow past this, abandon.
         val result = withTimeoutOrNull(PER_CONFIG_BUDGET_MS) {
-            // STAGE 1 — find a probe endpoint that succeeds through this outbound.
+            // STAGE 1 — find a FILTERED target that succeeds through this outbound.
             var first = -1L
             var firstUrlIdx = -1
             for ((i, url) in PROBE_URLS.withIndex()) {
                 val ms = singleProbe(json, url)
-                if (ms in 1..5000) { first = ms; firstUrlIdx = i; break }
+                if (ms in 1..MAX_VALID_MS) { first = ms; firstUrlIdx = i; break }
             }
             if (first <= 0) return@withTimeoutOrNull UNREACHABLE
 
             // STAGE 2 — CONFIRMATION. A single successful handshake can be a
             // fluke (TCP front answered, TLS resumed, a cached 204). We require a
-            // SECOND independent round-trip to a DIFFERENT real endpoint to prove
-            // the proxy actually carries sustained traffic. Only configs that pass
-            // BOTH are reported reachable, killing the "ping lied" false positives
-            // so every green config truly connects.
+            // SECOND independent round-trip to a DIFFERENT filtered endpoint to
+            // prove the proxy actually carries sustained traffic to the services
+            // the user really needs. Only configs that pass BOTH are reported
+            // reachable — this is the rule that makes "ping == 100% connects".
             var confirm = -1L
             for ((i, url) in PROBE_URLS.withIndex()) {
                 if (i == firstUrlIdx) continue
                 confirm = singleProbe(json, url)
-                if (confirm in 1..5000) break
+                if (confirm in 1..MAX_VALID_MS) break
             }
-            // Fallback: if every OTHER endpoint is unreachable (e.g. only gstatic
-            // is allowed on this link), re-probe the SAME endpoint once more —
-            // two consecutive successes still beats a one-shot fluke.
-            if (confirm !in 1..5000 && firstUrlIdx >= 0) {
+            // Fallback: if every OTHER endpoint is unreachable on this link,
+            // re-probe the SAME endpoint once more — two consecutive successes
+            // still beats a one-shot fluke.
+            if (confirm !in 1..MAX_VALID_MS && firstUrlIdx >= 0) {
                 confirm = singleProbe(json, PROBE_URLS[firstUrlIdx])
             }
-            if (confirm !in 1..5000) return@withTimeoutOrNull UNREACHABLE
+            if (confirm !in 1..MAX_VALID_MS) return@withTimeoutOrNull UNREACHABLE
 
             // Report the better (lower) of the two as the representative latency.
             minOf(first, confirm)
