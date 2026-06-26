@@ -96,7 +96,7 @@ object CcNewFeed {
             val conn = (URL(u).openConnection() as HttpURLConnection).apply {
                 connectTimeout = 5000; readTimeout = 6000
                 instanceFollowRedirects = true
-                setRequestProperty("User-Agent", "ProfessorVPN/4.0")
+                setRequestProperty("User-Agent", "ProfessorVPN/4.1")
                 setRequestProperty("Accept", "application/vnd.github+json")
             }
             if (conn.responseCode !in 200..299) return -1

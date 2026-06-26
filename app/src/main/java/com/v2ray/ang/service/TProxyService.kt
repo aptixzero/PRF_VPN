@@ -13,14 +13,39 @@ package com.v2ray.ang.service
  */
 object TProxyService {
 
+    /**
+     * v4.1: whether the native tun2socks library loaded successfully. We load it
+     * defensively (instead of an unguarded `System.loadLibrary` in init{}) so a
+     * missing / ABI-mismatched .so can NEVER take the whole process down with an
+     * ExceptionInInitializerError the first time this class is touched (a real
+     * launch-crash source on exotic devices). If it fails to load, the VPN core
+     * still works through the Xray SOCKS inbound; only the native byte-counter
+     * fallback is unavailable.
+     */
+    @JvmStatic
+    @Volatile
+    var nativeAvailable: Boolean = false
+        private set
+
     init {
-        System.loadLibrary("hev-socks5-tunnel")
+        nativeAvailable = try {
+            System.loadLibrary("hev-socks5-tunnel")
+            true
+        } catch (t: Throwable) {
+            android.util.Log.e("TProxyService", "native load failed: ${t.message}")
+            false
+        }
     }
 
     /** No-op that just forces the native library (and its JNI_OnLoad) to load
-     *  eagerly — called from the splash screen so the first connect is warm. */
+     *  eagerly — called from the splash screen so the first connect is warm.
+     *  Fully crash-safe: any class-init failure is swallowed. */
     @JvmStatic
-    fun touch() { /* loading happens in the init block above */ }
+    fun touch() {
+        // Referencing nativeAvailable forces class init (the load above) to run,
+        // but any failure has already been caught inside init{}.
+        if (!nativeAvailable) android.util.Log.w("TProxyService", "native unavailable")
+    }
 
     /** Starts the tun2socks loop. Blocks until the tunnel stops. */
     @JvmStatic

@@ -108,38 +108,65 @@ class SplashActivity : BaseActivity() {
     }
 
     private fun prepareEverything() {
+        // v4.1: the ENTIRE boot routine is wrapped so a failure in any single
+        // step (native init, prefs, animation) can NEVER strand the user on the
+        // splash screen or crash the app. Whatever happens, we always proceed to
+        // MainActivity — the heavy native prep is a "nice to have" warm-up, not a
+        // hard prerequisite (the VPN service re-inits the core lazily on connect).
         lifecycleScope.launch {
-            setProgress(10, "")
-            delay(140)
+            try {
+                setProgress(10, "")
+                delay(140)
 
-            // ---- heavy native preparation on a background thread ----
-            withContext(Dispatchers.IO) {
-                val xray = XrayManager(applicationContext)
-                runOnUiThread { setProgress(34, "") }
-                try { xray.init() } catch (_: Throwable) {}
-                runOnUiThread { setProgress(58, "") }
-                XrayManager.cachedVersion()
+                // ---- heavy native preparation on a background thread ----
+                runCatching {
+                    withContext(Dispatchers.IO) {
+                        val xray = XrayManager(applicationContext)
+                        runOnUiThread { setProgress(34, "") }
+                        try { xray.init() } catch (_: Throwable) {}
+                        runOnUiThread { setProgress(58, "") }
+                        XrayManager.cachedVersion()
+                    }
+                }
+
+                // warm tun2socks .so so the first connect is hot
+                runCatching {
+                    withContext(Dispatchers.IO) {
+                        try { com.v2ray.ang.service.TProxyService.touch() } catch (_: Throwable) {}
+                    }
+                }
+                setProgress(78, "")
+                delay(140)
+
+                runCatching {
+                    val prefs = getSharedPreferences("neonvpn_boot", MODE_PRIVATE)
+                    prefs.edit().putBoolean("first_run_done", true).apply()
+                }
+
+                setProgress(92, "")
+                delay(160)
+                setProgress(100, "")
+                delay(220)
+            } catch (_: Throwable) {
+                // Swallow ANYTHING — we still navigate below.
+            } finally {
+                goToMain()
             }
-
-            // warm tun2socks .so so the first connect is hot
-            withContext(Dispatchers.IO) {
-                try { com.v2ray.ang.service.TProxyService.touch() } catch (_: Throwable) {}
-            }
-            setProgress(78, "")
-            delay(140)
-
-            val prefs = getSharedPreferences("neonvpn_boot", MODE_PRIVATE)
-            prefs.edit().putBoolean("first_run_done", true).apply()
-
-            setProgress(92, "")
-            delay(160)
-
-            setProgress(100, "")
-            delay(220)
-
-            startActivity(Intent(this@SplashActivity, MainActivity::class.java))
-            overridePendingTransition(android.R.anim.fade_in, android.R.anim.fade_out)
-            finish()
         }
     }
+
+    /** Navigate to MainActivity exactly once, fully guarded. */
+    private fun goToMain() {
+        if (isFinishing || navigated) return
+        navigated = true
+        try {
+            startActivity(Intent(this@SplashActivity, MainActivity::class.java))
+            overridePendingTransition(android.R.anim.fade_in, android.R.anim.fade_out)
+        } catch (_: Throwable) {
+        } finally {
+            try { finish() } catch (_: Throwable) {}
+        }
+    }
+
+    @Volatile private var navigated = false
 }

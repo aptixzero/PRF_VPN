@@ -62,6 +62,16 @@ class MainActivity : BaseActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // v4.1: the whole wiring is guarded. A failure while wiring tabs / the
+        // drawer must not crash the home screen — at worst a control is inert.
+        try {
+            setupUi(savedInstanceState)
+        } catch (e: Throwable) {
+            android.util.Log.e("MainActivity", "setup failed: ${e.message}", e)
+        }
+    }
+
+    private fun setupUi(savedInstanceState: Bundle?) {
         // Consume any pending ui_dirty flag that may have been set BEFORE this
         // activity was (re)created so we don't recreate ourselves in a loop.
         clearUiDirty()

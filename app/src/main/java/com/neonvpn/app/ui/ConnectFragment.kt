@@ -228,7 +228,7 @@ class ConnectFragment : Fragment() {
                 val c = (URL(url).openConnection() as HttpURLConnection).apply {
                     connectTimeout = 7000; readTimeout = 9000
                     instanceFollowRedirects = true
-                    setRequestProperty("User-Agent", "ProfessorVPN/4.0")
+                    setRequestProperty("User-Agent", "ProfessorVPN/4.1")
                 }
                 c.inputStream.use { android.graphics.BitmapFactory.decodeStream(it) }
             } catch (_: Throwable) { null }
