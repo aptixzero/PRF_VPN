@@ -62,9 +62,60 @@ class CrashHandler private constructor(
             return
         }
 
-        // For the main/UI thread, fall back to the platform default so Android
-        // can restart/clean up properly instead of leaving a frozen screen.
+        // ── MAIN / UI thread crash ──────────────────────────────────────────
+        // v4.1: the previous behaviour deferred to the platform default handler,
+        // which surfaced the dreaded "Professor VPN keeps stopping" dialog and
+        // left the user with an app that "won't open". Instead we now schedule a
+        // clean relaunch of the SplashActivity a moment from now and then kill
+        // the current (broken) process. To the user this looks like the app
+        // simply reopening itself rather than dying — far friendlier, and it
+        // recovers from a one-off bad state (e.g. a corrupt cached config, a
+        // transient inflation failure) without the user having to do anything.
+        //
+        // A guard prevents a crash-loop: if we relaunched very recently we let
+        // the platform handler take over so we don't spin forever.
+        val now = System.currentTimeMillis()
+        val recentlyRelaunched = (now - lastRelaunchAt) < RELAUNCH_GUARD_MS
+        if (!recentlyRelaunched) {
+            lastRelaunchAt = now
+            val scheduled = try { scheduleRestart() } catch (_: Throwable) { false }
+            if (scheduled) {
+                Log.w(TAG, "main-thread crash — relaunching app cleanly")
+                // Tear down THIS broken process; the AlarmManager will reopen us.
+                try { android.os.Process.killProcess(android.os.Process.myPid()) } catch (_: Throwable) {}
+                kotlin.system.exitProcess(10)
+                return
+            }
+        }
+
+        // Fallback: defer to the platform default so Android can clean up.
         previous?.uncaughtException(t, e)
+    }
+
+    /**
+     * Schedule a one-shot relaunch of the app (SplashActivity) ~400ms in the
+     * future via AlarmManager, so it survives the imminent process kill. Returns
+     * true if the alarm was queued.
+     */
+    private fun scheduleRestart(): Boolean {
+        val pm = appContext.packageManager ?: return false
+        val launch = pm.getLaunchIntentForPackage(appContext.packageName) ?: return false
+        launch.addFlags(
+            android.content.Intent.FLAG_ACTIVITY_NEW_TASK or
+                android.content.Intent.FLAG_ACTIVITY_CLEAR_TASK
+        )
+        val flags = android.app.PendingIntent.FLAG_ONE_SHOT or
+            (if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M)
+                android.app.PendingIntent.FLAG_IMMUTABLE else 0)
+        val pi = android.app.PendingIntent.getActivity(appContext, 0xC2A5, launch, flags)
+        val am = appContext.getSystemService(Context.ALARM_SERVICE) as? android.app.AlarmManager
+            ?: return false
+        am.set(
+            android.app.AlarmManager.RTC,
+            System.currentTimeMillis() + 400L,
+            pi
+        )
+        return true
     }
 
     private fun saveCrash(stamp: String, thread: String, trace: String) {
@@ -100,6 +151,12 @@ class CrashHandler private constructor(
     companion object {
         private const val TAG = "CrashHandler"
         private val SURVIVABLE_THREADS = setOf("vpn-start", "tun2socks", "stats", "watchdog")
+
+        // Crash-loop guard: if the main thread crashed and we relaunched less
+        // than this long ago, don't relaunch again (let the platform handle it)
+        // so a deterministic startup crash can't spin the process forever.
+        private const val RELAUNCH_GUARD_MS = 10_000L
+        @Volatile private var lastRelaunchAt = 0L
 
         // Sanitization patterns (see sanitize()).
         private val LINK_RX = Regex("""\b(?:vless|vmess|trojan|ss)://[^\s'"<>]+""")

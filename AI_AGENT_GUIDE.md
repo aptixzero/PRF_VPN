@@ -170,7 +170,7 @@ parsed by `RemoteConfig.parse`, exposed via `RemoteConfig.homeTelegramUrl`.
 monotonically-increasing `KEY_NAME_COUNTER`. Consecutive searches produce
 Server 1-100, then 101-200, then 201-300 … — the visible number does **not**
 restart per search and is **not** derived from the in-memory list size. It resets
-to 0 ONLY when the source repo (`prfgame/cccfigs`) rotation resets (a new publish,
+to 0 ONLY when the source repo (`aptixzero/con_new`) rotation resets (a new publish,
 which also resets file/offset). Identity/dedup is still by config CONTENT
 (`ConfigParser.dedupKey`), never by visible name.
 
