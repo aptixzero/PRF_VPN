@@ -46,19 +46,23 @@ object XrayConfigBuilder {
         root.put("policy", JSONObject().apply {
             put("levels", JSONObject().apply {
                 put("8", JSONObject().apply {
-                    // faster handshake give-up so dead links fail quickly, longer
-                    // idle so a healthy tunnel isn't torn down on a quiet moment.
-                    put("handshake", 4)
-                    put("connIdle", 300)
-                    put("uplinkOnly", 1)
-                    put("downlinkOnly", 1)
+                    // v4.5 SPEED — handshake gets a touch more room so a node on
+                    // Iran's disrupted links isn't dropped mid-TLS, while a long
+                    // connIdle keeps a healthy tunnel alive through quiet moments
+                    // (downloads that pause, screen-off, etc.) so it "never drops".
+                    put("handshake", 6)
+                    put("connIdle", 600)
+                    put("uplinkOnly", 0)
+                    put("downlinkOnly", 0)
                     put("statsUserUplink", true)
                     put("statsUserDownlink", true)
-                    // Larger per-connection buffer => higher throughput on big
-                    // transfers ("تمام پهنای باند"). 1 MiB is a strong, safe
-                    // sweet-spot for full-speed downloads without spiking RAM on
-                    // weak phones.
-                    put("bufferSize", 1024)
+                    // v4.5 — BIGGER per-connection buffer for true full-bandwidth
+                    // ("تمام پهنای باند") downloads. 4 MiB lets a single fast stream
+                    // fill the user's whole pipe (high-BDP links) instead of being
+                    // throttled by a small window, while still safe on modern
+                    // phones. uplink/downlinkOnly = 0 means the buffer is freed
+                    // promptly when one direction goes idle, so RAM stays bounded.
+                    put("bufferSize", 4096)
                 })
             })
             put("system", JSONObject().apply {
@@ -434,32 +438,37 @@ object XrayConfigBuilder {
         // what keeps the tunnel ALIVE on disrupted Iranian internet instead of
         // dropping every few seconds. Keep-alive keeps the socket persistent.
         stream.put("sockopt", JSONObject().apply {
-            // More aggressive keep-alive than before: probe every 15s after just
-            // 30s idle so a half-dead connection on Iran's flaky internet is
-            // detected & re-established FAST instead of silently hanging.
+            // v4.5 — keep-alive tuned for "never drops, even idle for hours". We
+            // probe every 15s after 30s idle so a half-dead link is detected and
+            // re-established FAST, yet the long connIdle policy above keeps a quiet
+            // but healthy tunnel up (e.g. a paused download / screen off).
             put("tcpKeepAliveIdle", 30)
             put("tcpKeepAliveInterval", 15)
-            put("tcpNoDelay", true)
+            put("tcpNoDelay", true)         // no Nagle delay → snappier first byte
             put("tcpMptcp", false)
             put("mark", 0)
-            // Fragment the TLS handshake records. "tlshello" mode targets exactly
-            // the ClientHello (where SNI lives); length/interval are randomised
-            // ranges so the pattern itself isn't fingerprintable.
+            // TCP Fast Open shaves a round-trip off every new connection — a real
+            // latency win on Iran's high-RTT links (browsing feels much faster).
+            put("tcpFastOpen", true)
+            // Fragment the TLS handshake records. "tlshello" mode targets EXACTLY
+            // the ClientHello (where SNI lives), so it costs essentially nothing on
+            // throughput (only the first handshake packet is split) while still
+            // hiding the SNI from DPI. Tighter, lower-overhead ranges than v4.4 so
+            // the anti-DPI win doesn't slow the handshake.
             if (sec == "tls" || sec == "reality") {
                 put("dialerProxy", "")
-                put("tcpFastOpen", true)
                 put("fragment", JSONObject().apply {
                     put("packets", "tlshello")
-                    put("length", "100-200")
-                    put("interval", "10-20")
+                    put("length", "40-100")
+                    put("interval", "5-10")
                 })
             } else {
-                // for plaintext transports, fragment the very first few packets so
-                // protocol-pattern DPI still can't lock on immediately.
+                // for plaintext transports, fragment only the very first packet so
+                // protocol-pattern DPI can't lock on, with minimal speed cost.
                 put("fragment", JSONObject().apply {
-                    put("packets", "1-3")
-                    put("length", "100-200")
-                    put("interval", "10-20")
+                    put("packets", "1-2")
+                    put("length", "40-100")
+                    put("interval", "5-10")
                 })
             }
         })

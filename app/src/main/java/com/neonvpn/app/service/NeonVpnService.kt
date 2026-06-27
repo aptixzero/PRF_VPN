@@ -200,17 +200,21 @@ class NeonVpnService : VpnService() {
             emitProgress(70, "Verifying")
             var health = -1L
             run {
-                // v4.2 — give a freshly-started core more room to warm up before
-                // we judge it. A cold Reality/XTLS handshake on Iran's disrupted
-                // links can take a couple of seconds; retrying patiently here is
-                // what makes "if it pinged, it connects 100%" hold in practice.
-                val deadline = System.currentTimeMillis() + 12000
+                // v4.5 — confirm the LIVE tunnel with the SAME two-censored-endpoint
+                // rule the per-config ping uses (XrayManager.confirmedHealth). This
+                // is what makes "if it pinged, it REALLY connects 100%" hold true:
+                // the connect verdict now matches the ping verdict exactly, instead
+                // of a single lucky generate_204 (which produced the fake-ping bug).
+                //
+                // A cold Reality/XTLS handshake on Iran's disrupted links can take a
+                // couple of seconds, so we retry patiently within a generous window.
+                val deadline = System.currentTimeMillis() + 14000
                 var attempts = 0
-                while (System.currentTimeMillis() < deadline && attempts < 6) {
+                while (System.currentTimeMillis() < deadline && attempts < 8) {
                     attempts++
-                    val d = try { xray.measureDelay() } catch (_: Throwable) { -1L }
+                    val d = try { xray.confirmedHealth() } catch (_: Throwable) { -1L }
                     if (d in 1..15000) { health = d; break }
-                    try { Thread.sleep(500) } catch (_: InterruptedException) { break }
+                    try { Thread.sleep(450) } catch (_: InterruptedException) { break }
                 }
             }
             if (health !in 1..15000) {
@@ -424,12 +428,17 @@ class NeonVpnService : VpnService() {
             appendLine("  address: 127.0.0.1")
             appendLine("  udp: 'udp'")
             appendLine("misc:")
-            // bigger task stack + larger buffers => higher throughput on big
-            // transfers; tighter connect-timeout so dead links fail fast and the
-            // session recovers quickly instead of hanging.
-            appendLine("  task-stack-size: 81920")
-            appendLine("  connect-timeout: 4000")
-            appendLine("  read-write-timeout: 60000")
+            // v4.5 — tuned for FULL bandwidth + rock-solid persistence:
+            //   • bigger per-task stack => the native tunnel can drive many
+            //     parallel high-throughput streams without stack pressure;
+            //   • a generous read-write-timeout (5 min) so a long idle download /
+            //     a screen-off pause / hours in another app never tears a live
+            //     connection down — it just resumes pulling at full speed;
+            //   • a tight connect-timeout so a genuinely dead link fails fast and
+            //     the watchdog can recover instead of hanging.
+            appendLine("  task-stack-size: 163840")
+            appendLine("  connect-timeout: 5000")
+            appendLine("  read-write-timeout: 300000")
             appendLine("  log-level: warn")
         }
     }
@@ -445,7 +454,10 @@ class NeonVpnService : VpnService() {
             var lastPing = -1L
 
             // Do an immediate ping right after connect so the user sees a real
-            // number within ~1-2s instead of staring at a dash.
+            // number within ~1-2s instead of staring at a dash. We use a single
+            // fast probe for the DISPLAYED number (cheap, refreshed often); the
+            // authoritative keep-alive decision lives in the watchdog, which uses
+            // the heavier confirmed (two-endpoint) check.
             try {
                 val p0 = xray.measureDelay()
                 if (p0 in 1..8000) lastPing = p0
@@ -561,19 +573,33 @@ class NeonVpnService : VpnService() {
                     if (!hasUsableNetwork()) {
                         Log.i(TAG, "watchdog: no physical network — holding tunnel, not failing")
                         applyUnderlyingNetwork()
+                        // v4.5 — keep the wake lock fresh while we wait out the
+                        // outage so a multi-hour download / background session never
+                        // gets suspended and the tunnel resumes the instant the
+                        // network (wifi or data) comes back, at full speed.
+                        acquireWakeLock()
                         continue
                     }
+                    // v4.5 — periodically renew the wake lock during normal healthy
+                    // operation too, so the session genuinely "never drops" even
+                    // across the original 10h window (long idle downloads, etc.).
+                    acquireWakeLock()
 
                     // v4.2 — confirm a failure with a SECOND probe before reacting,
                     // so a single dropped probe (very common on Iran's flaky links)
                     // can never trigger a needless reconnect/teardown.
+                    // v4.5 — the watchdog judges the tunnel with the SAME confirmed
+                    // (two-censored-endpoint) health check the connect path + the
+                    // per-config ping use, so it agrees with what the user saw when
+                    // they connected. A node that has silently gone dead can no
+                    // longer keep faking "still connected" off one lucky probe.
                     val coreAlive = try { xray.isRunning } catch (_: Throwable) { false }
                     var health = if (coreAlive) {
-                        try { xray.measureDelay() } catch (_: Throwable) { -1L }
+                        try { xray.confirmedHealth() } catch (_: Throwable) { -1L }
                     } else -1L
                     if (coreAlive && health !in 1..15000) {
                         try { Thread.sleep(700) } catch (_: InterruptedException) { break }
-                        health = try { xray.measureDelay() } catch (_: Throwable) { -1L }
+                        health = try { xray.confirmedHealth() } catch (_: Throwable) { -1L }
                     }
 
                     val healthy = coreAlive && health in 1..15000
@@ -598,7 +624,7 @@ class NeonVpnService : VpnService() {
                             val ok = xray.start(json)
                             if (ok) {
                                 Thread.sleep(500)
-                                val again = try { xray.measureDelay() } catch (_: Throwable) { -1L }
+                                val again = try { xray.confirmedHealth() } catch (_: Throwable) { -1L }
                                 if (again in 1..15000) {
                                     consecutiveFailures = 0
                                     reviveAttempts = 0

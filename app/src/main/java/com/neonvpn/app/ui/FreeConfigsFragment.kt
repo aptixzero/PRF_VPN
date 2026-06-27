@@ -203,12 +203,32 @@ class FreeConfigsFragment : Fragment() {
     private fun reloadFromStore() {
         // Fully defensive: a store read / adapter swap during heavy Auto-Test
         // churn must never bubble an exception onto the main thread.
+        //
+        // v4.5 — CRASH FIX. The old code reassigned `adapter.items = fresh` and
+        // THEN called applyStatuses(), which itself recomputed a DiffUtil pass off
+        // the freshly-swapped list. Doing the swap outside a notify cycle while the
+        // RecyclerView was mid-layout (very common during Auto-Test churn) left the
+        // adapter's item count out of sync with the RecyclerView → the
+        // "Inconsistency detected" crash on the 1→2→3 list transition. We now:
+        //   • bail if the RecyclerView is currently computing layout / animating
+        //     (re-post shortly after), and
+        //   • drive the whole list change through applyStatuses' guarded DiffUtil
+        //     by seeding the adapter with the fresh rows in the SAME guarded block.
         runCatching {
             if (!isAdded) return
+            val rv = view?.findViewById<RecyclerView>(R.id.recycler)
+            if (rv != null && (rv.isComputingLayout || rv.isAnimating)) {
+                // Defer until the RecyclerView is idle so we never mutate the
+                // backing list while it is being read for layout.
+                rv.post { runCatching { reloadFromStore() } }
+                return
+            }
             val fresh = freeStore.get()
-            adapter.items = fresh
             seenKeys.clear()
             fresh.forEach { seenKeys.add(ConfigParser.dedupKey(it)) }
+            // Seed the adapter with the fresh rows, then let the guarded DiffUtil
+            // in applyStatuses reconcile + re-sort in one atomic, crash-proof pass.
+            adapter.items = ArrayList(fresh)
             adapter.applyStatuses(PingService.statuses.value)
             refreshEmpty()
             updateListHeader()

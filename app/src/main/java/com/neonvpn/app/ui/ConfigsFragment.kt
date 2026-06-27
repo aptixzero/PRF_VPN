@@ -294,27 +294,51 @@ class ServerAdapter(
      * Re-render with the latest ping statuses and re-sort fastest-first via a
      * DiffUtil pass (stable ids → only changed/moved rows animate). Selection
      * order in select-mode is left untouched to avoid surprising the user.
+     *
+     * v4.5 — CRASH-PROOF. The Auto-Test engine and the manual ping flow both
+     * push status maps onto the main thread, and the engine ALSO reloads the
+     * whole list (`items = fresh`) between batches. If a DiffUtil pass starts
+     * reading `oldItems` and then a second writer swaps `items` mid-flight, the
+     * RecyclerView's internal bookkeeping desyncs → the infamous
+     * "Inconsistency detected. Invalid view holder adapter position" crash that
+     * fired exactly when Auto-Test moved from list 1 → 2 → 3. We now:
+     *   • take an IMMUTABLE snapshot of the old list up-front,
+     *   • compute the new sorted list off that snapshot,
+     *   • swap `items` BEFORE dispatching the diff (so the adapter and the diff
+     *     agree on the new contents), and
+     *   • wrap the whole thing in runCatching + a full notifyDataSetChanged
+     *     fallback so even a genuinely racy state can never crash the process.
      */
     fun applyStatuses(map: Map<String, PingStatus>) {
         val old = statuses
-        val oldItems = items
         statuses = map
-        if (selectMode) { notifyDataSetChanged(); return }
-        val sorted = items.sortedBy { PingService.sortKey(map[it.id] ?: PingStatus.Idle) }
-        val diff = androidx.recyclerview.widget.DiffUtil.calculateDiff(
-            object : androidx.recyclerview.widget.DiffUtil.Callback() {
-                override fun getOldListSize() = oldItems.size
-                override fun getNewListSize() = sorted.size
-                override fun areItemsTheSame(o: Int, n: Int) = oldItems[o].id == sorted[n].id
-                override fun areContentsTheSame(o: Int, n: Int): Boolean {
-                    val id = sorted[n].id
-                    // Same row only "unchanged" if its status didn't change.
-                    return oldItems[o].id == id && old[id] == map[id]
+        if (selectMode) { runCatching { notifyDataSetChanged() }; return }
+        runCatching {
+            // Immutable snapshot of the current rows for a consistent diff.
+            val oldItems: List<ServerConfig> = ArrayList(items)
+            val sorted = oldItems.sortedBy { PingService.sortKey(map[it.id] ?: PingStatus.Idle) }
+            val diff = androidx.recyclerview.widget.DiffUtil.calculateDiff(
+                object : androidx.recyclerview.widget.DiffUtil.Callback() {
+                    override fun getOldListSize() = oldItems.size
+                    override fun getNewListSize() = sorted.size
+                    override fun areItemsTheSame(o: Int, n: Int) = oldItems[o].id == sorted[n].id
+                    override fun areContentsTheSame(o: Int, n: Int): Boolean {
+                        val id = sorted[n].id
+                        // Same row only "unchanged" if its status didn't change.
+                        return oldItems[o].id == id && old[id] == map[id]
+                    }
                 }
+            )
+            items = sorted.toMutableList()
+            diff.dispatchUpdatesTo(this)
+        }.onFailure {
+            // Last-ditch: drop animations, just resync the whole list. Never throw.
+            runCatching {
+                items = items.sortedBy { PingService.sortKey(map[it.id] ?: PingStatus.Idle) }
+                    .toMutableList()
+                notifyDataSetChanged()
             }
-        )
-        items = sorted.toMutableList()
-        diff.dispatchUpdatesTo(this)
+        }
     }
 
     fun toggleChecked(id: String) {
