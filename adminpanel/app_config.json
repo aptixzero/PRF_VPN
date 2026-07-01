@@ -1,43 +1,14 @@
 {
-  "version": 12,
+  "version": 13,
   "ts": 1781704800000,
   "lastUpdatedAt": 1781704800000,
-  "latestApkVersion": "3.8",
+  "latestApkVersion": "4.6",
   "inAppTelegramUrl": "https://t.me/Undercity_c",
   "inAppTelegram": {
     "url": "https://t.me/Undercity_c"
   },
-  "appBanner": {
-    "enabled": true,
-    "title": "",
-    "subtitle": "",
-    "bgColor": "#11161C",
-    "textColor": "#E6F2EC",
-    "imageUrl": "https://raw.githubusercontent.com/prfgame/prf-VPN/main/adminpanel/media/appbanner_1781622337786.png?v=1781622337786",
-    "mediaVisible": true,
-    "action": "url",
-    "actionUrl": "https://t.me/Undercity_c"
-  },
-  "websiteBanner": {
-    "enabled": true,
-    "title": "محل تبلیغ شما",
-    "subtitle": "جهت ثبت تبلیغ با ما در ارتباط باشید",
-    "imageUrl": "",
-    "mediaVisible": true,
-    "action": "contact",
-    "actionUrl": ""
-  },
   "appLogo": {
     "url": ""
-  },
-  "websiteLogo": {
-    "url": ""
-  },
-  "sponsor": {
-    "enabled": true,
-    "heading": "",
-    "note": "",
-    "items": []
   },
   "contact": {
     "text": "جهت ثبت تبلیغات و استعلام قیمت بنر به آیدی زیر در تلگرام پیام دهید:",
@@ -46,13 +17,43 @@
     "btnCopy": "کپی آیدی",
     "btnSend": "ارسال پیام"
   },
+  "homeCta": {
+    "enabled": true,
+    "labelFa": "عضو کانال تلگرام شوید",
+    "labelEn": "Join our Telegram channel",
+    "url": "https://t.me/Undercity_c"
+  },
+  "homeBanner": {
+    "enabled": true,
+    "imageUrl": "",
+    "text": "محل تبلیغ شما",
+    "textColor": "#E6F2EC",
+    "url": "https://t.me/Undercity_c"
+  },
+  "donate": {
+    "enabled": true,
+    "heading": "از پروژه حمایت کنید",
+    "note": "حمایت شما سرورها را پایدار و پرسرعت نگه می‌دارد",
+    "items": []
+  },
+  "appBanner": {
+    "enabled": true,
+    "title": "",
+    "subtitle": "",
+    "bgColor": "#11161C",
+    "textColor": "#E6F2EC",
+    "imageUrl": "",
+    "mediaVisible": true,
+    "action": "url",
+    "actionUrl": "https://t.me/Undercity_c"
+  },
   "ad": {
     "enabled": true,
     "title": "",
     "subtitle": "",
     "bgColor": "#11161C",
     "textColor": "#E6F2EC",
-    "imageUrl": "https://raw.githubusercontent.com/prfgame/prf-VPN/main/adminpanel/media/appbanner_1781622337786.png?v=1781622337786",
+    "imageUrl": "",
     "action": "url",
     "actionUrl": "https://t.me/Undercity_c"
   }

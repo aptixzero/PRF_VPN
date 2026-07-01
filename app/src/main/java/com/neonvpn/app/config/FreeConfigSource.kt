@@ -6,159 +6,174 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
 /**
- * v3.8 FREE-CONFIG SOURCE — the *only* source for the Free Configs tab.
+ * v4.6 FREE-CONFIG SOURCE — reads directly from the 50 LIVE feeds in
+ * [LiveSources] (the dead `aptixzero/con_new` mirror is gone).
  *
- * MIGRATION (v3.8): the deprecated `prfgame/cccfigs` feed (configs_NN.txt, 10
- * files) is replaced by `prfgame/CC_new` (configs_NNN.txt, discovered at runtime
- * — see [CcNewFeed]). The low-level fetch / per-file parse / file-count discovery
- * now lives in [CcNewFeed]; this object owns the deterministic cursor.
+ * ── 240-PER-PRESS: 120 VLESS + 120 VMESS ────────────────────────────────────
+ *  Every batch ([nextBatch]) collects up to [VLESS_PER_PRESS] (=120) unique
+ *  VLESS and [VMESS_PER_PRESS] (=120) unique VMESS configs — 240 total — and
+ *  INTERLEAVES them (vless, vmess, vless, vmess …) so the resulting list is an
+ *  even half-and-half mix, exactly as required.
  *
- * ── DETERMINISTIC 120-PER-PRESS CURSOR ─────────────────────────────────────
- *  • Every "Load More" (Search) returns the NEXT [BATCH_PER_PRESS] (=120) unique
- *    entries in deterministic, persisted catalog order:
- *        tap 1 → entries 1..120, tap 2 → 121..240, tap 3 → 241..360, …
- *  • "Entry N" = the Nth line counted in FILE ORDER (configs_000 lines 1..2200,
- *    then configs_001 lines 1..2200, …) AFTER the vless/vmess parse filter.
- *  • The catalog cursor [KEY_CURSOR] is a single monotonically-advancing integer
- *    persisted in SharedPreferences. When it passes the end of the catalog it
- *    WRAPS to 0. Simple deterministic wrap — no per-day seed, no per-user shuffle.
- *  • Deduplication is by canonical key (host:port:uuid / host:port:id) computed
- *    BEFORE assigning the visible "Server N" number, so duplicates never waste a
- *    slot. The visible "Server N" counter ([KEY_NAME_COUNTER]) keeps advancing
- *    monotonically (Server 1, 2, 3, … across presses) exactly as before.
+ * ── DON'T SCAN ALL 50 AT ONCE ───────────────────────────────────────────────
+ *  We keep a persistent per-kind SOURCE cursor. Each press walks only as many
+ *  sources as it needs to fill its 120/120 quota (typically 1–3 feeds per kind),
+ *  then remembers where it stopped. The next press resumes from the next source,
+ *  wrapping to the first source at the end. This keeps every press fast and
+ *  light on an Iranian mobile link.
  *
- * Only one feed file is held in memory at a time (see [CcNewFeed.parseFile]).
+ * ── MEMORY + 30-DAY RESET ───────────────────────────────────────────────────
+ *  Dedup is by canonical key ([ConfigParser.dedupKey]) persisted in
+ *  [SeenConfigStore] so a config that was ever added is never re-added — while
+ *  the stored set stays bounded (never bloats the cache). After 30 days the
+ *  whole pipeline resets (seen-set cleared, cursors + Server-N restart from the
+ *  first source); the user's saved My-Configs are never touched.
+ *
+ * ── NEUTRAL NAMING ──────────────────────────────────────────────────────────
+ *  Configs are renamed to a generic "Server N" (monotonic, persisted). The real
+ *  feed name / channel branding is NEVER shown.
  */
 object FreeConfigSource {
 
     private const val TAG = "FreeConfigSource"
 
-    /** Entries returned per "Load More" press. */
-    const val BATCH_PER_PRESS = 120
+    const val VLESS_PER_PRESS = 120
+    const val VMESS_PER_PRESS = 120
 
-    private const val PREFS = "free_cc_new_v38"
-    private const val KEY_CURSOR = "cc_new_cursor"        // global catalog line index
-    private const val KEY_SEEDED = "seeded"
-    /**
-     * PERSISTENT, monotonically-increasing "Server N" name counter. Server 1, 2,
-     * 3 … across consecutive presses; it does NOT restart per press and is NOT
-     * derived from the in-memory list size. (v3.8: no per-rotation reset — the
-     * CC_new feed has no logical "rotation reset" event, so numbering is purely
-     * monotonic and survives restarts.)
-     */
+    /** Total configs a single press yields. */
+    const val BATCH_PER_PRESS = VLESS_PER_PRESS + VMESS_PER_PRESS   // 240
+
+    private const val PREFS = "free_live_v46"
+    private const val KEY_VLESS_CURSOR = "vless_src_cursor"
+    private const val KEY_VMESS_CURSOR = "vmess_src_cursor"
     private const val KEY_NAME_COUNTER = "name_counter"
+    private const val KEY_SEEDED = "seeded"
 
-    /** A single search batch result. */
+    /** Max source feeds walked per kind in one press (keeps it fast). */
+    private const val MAX_SOURCES_PER_PRESS = 6
+
     data class Batch(
-        val configs: List<ServerConfig>,   // already renamed Server N
-        val foundRaw: Int,                  // raw catalog lines consumed this press
-        val reachedEnd: Boolean             // true if the cursor wrapped past the last file
+        val configs: List<ServerConfig>,   // already renamed Server N, interleaved
+        val foundRaw: Int,
+        val reachedEnd: Boolean
     )
 
     private fun prefs(ctx: Context) = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
 
-    /** Ensure first-launch state: fresh install starts at cursor 0, Server 1. */
+    /** Ensure first-launch state + honour the 30-day reset. */
     suspend fun ensureFreshState(ctx: Context) {
         val p = prefs(ctx)
         if (!p.getBoolean(KEY_SEEDED, false)) {
-            p.edit().putInt(KEY_CURSOR, 0).putInt(KEY_NAME_COUNTER, 0)
-                .putBoolean(KEY_SEEDED, true).apply()
+            p.edit().putInt(KEY_VLESS_CURSOR, 0).putInt(KEY_VMESS_CURSOR, 0)
+                .putInt(KEY_NAME_COUNTER, 0).putBoolean(KEY_SEEDED, true).apply()
         }
-        // Warm the file-count cache so the first press resolves quickly.
-        try { CcNewFeed.fileCount(ctx) } catch (_: Throwable) {}
+        // 30-day reset: clear seen memory + restart cursors from the first source.
+        if (SeenConfigStore.shouldReset(ctx)) {
+            SeenConfigStore.performReset(ctx)
+            p.edit().putInt(KEY_VLESS_CURSOR, 0).putInt(KEY_VMESS_CURSOR, 0)
+                .putInt(KEY_NAME_COUNTER, 0).apply()
+            Log.i(TAG, "30-day reset performed — restarting from source #1")
+        }
     }
 
-    /** The next Server number that would be assigned (1-based for display). */
     fun peekNextServerNumber(ctx: Context): Int = prefs(ctx).getInt(KEY_NAME_COUNTER, 0) + 1
 
     /**
-     * Pull the NEXT [BATCH_PER_PRESS] unique vless/vmess entries from the device's
-     * persisted catalog cursor, advancing it as it goes. Walks the catalog in file
-     * order (lazy: one file in memory at a time), skips entries whose canonical key
-     * is already in [seenKeys] / already in the catalog dedup set, and wraps to the
-     * start when the end is reached.
+     * Pull the next 120 VLESS + 120 VMESS unique configs, INTERLEAVED.
      *
-     * @param onChunk (added so far this press, target=120, statusMessage)
+     * @param seenKeys in-memory dedup set (seeded from [SeenConfigStore]); this
+     *                 method also persists the union back to [SeenConfigStore].
      */
     suspend fun nextBatch(
         ctx: Context,
-        startIndex: Int,                      // (legacy, ignored) kept for call-site compat
-        seenKeys: MutableSet<String>,         // dedup against already-stored configs
+        startIndex: Int = 0,                  // legacy, ignored
+        seenKeys: MutableSet<String>,
         onChunk: (addedThisPress: Int, target: Int, status: String) -> Unit = { _, _, _ -> }
     ): Batch = withContext(Dispatchers.IO) {
         val p = prefs(ctx)
-        val fileCount = CcNewFeed.fileCount(ctx).coerceAtLeast(1)
-        val catalogLen = fileCount * CcNewFeed.MAX_LINES_PER_FILE   // upper bound for wrap math
-
-        var cursor = p.getInt(KEY_CURSOR, 0).coerceAtLeast(0)
         var serverIndex = p.getInt(KEY_NAME_COUNTER, 0).coerceAtLeast(0)
 
-        val collected = ArrayList<ServerConfig>(BATCH_PER_PRESS)
-        var rawConsumed = 0
-        var wrapped = false
-        // Bound the walk so a catalog full of duplicates can never loop forever:
-        // never scan more than the whole catalog (one full wrap) in a single press.
-        var safetyBudget = catalogLen + CcNewFeed.MAX_LINES_PER_FILE
+        onChunk(0, BATCH_PER_PRESS, "Loading configs…")
 
-        onChunk(0, BATCH_PER_PRESS, "Loading free configs...")
+        // Collect each kind independently from its own source cursor.
+        val vlessOut = ArrayList<ServerConfig>(VLESS_PER_PRESS)
+        val vmessOut = ArrayList<ServerConfig>(VMESS_PER_PRESS)
 
-        // The cursor is a GLOBAL line index. Convert to (file, lineInFile) and
-        // walk forward, loading each file lazily and resuming mid-file.
-        var fileIdx = (cursor / CcNewFeed.MAX_LINES_PER_FILE) % fileCount
-        var lineInFile = cursor % CcNewFeed.MAX_LINES_PER_FILE
-        var filesVisited = 0
+        var vlessCursor = collectKind(
+            ctx, LiveSources.VLESS, p.getInt(KEY_VLESS_CURSOR, 0),
+            VLESS_PER_PRESS, seenKeys, vlessOut
+        )
+        onChunk(vlessOut.size, BATCH_PER_PRESS, "Found ${vlessOut.size} VLESS")
 
-        while (collected.size < BATCH_PER_PRESS && safetyBudget > 0 && filesVisited <= fileCount) {
-            val links = CcNewFeed.parseFile(ctx, fileIdx)
-            if (links == null) {
-                // Unreachable file (and no cache): skip to the next file safely.
-                fileIdx = (fileIdx + 1) % fileCount
-                if (fileIdx == 0) wrapped = true
-                lineInFile = 0
-                cursor = fileIdx * CcNewFeed.MAX_LINES_PER_FILE
-                filesVisited++
-                continue
-            }
+        var vmessCursor = collectKind(
+            ctx, LiveSources.VMESS, p.getInt(KEY_VMESS_CURSOR, 0),
+            VMESS_PER_PRESS, seenKeys, vmessOut
+        )
+        onChunk(vlessOut.size + vmessOut.size, BATCH_PER_PRESS,
+            "Found ${vlessOut.size + vmessOut.size} configs")
 
-            var i = lineInFile.coerceAtMost(links.size)
-            while (i < links.size && collected.size < BATCH_PER_PRESS) {
-                val link = links[i]
-                i++
-                cursor++
-                rawConsumed++
-                safetyBudget--
-                val cfg = try { ConfigParser.parseSingleSafe(link) } catch (_: Throwable) { null }
-                    ?: continue
-                if (cfg.protocol != "vless" && cfg.protocol != "vmess") continue
-                val key = ConfigParser.dedupKey(cfg)
-                if (!seenKeys.add(key)) continue   // dedup BEFORE assigning N
-
-                serverIndex++
-                collected.add(cfg.copy(remark = "${ConfigFetcher.GENERIC_PREFIX} $serverIndex"))
-
-                if (collected.size % 10 == 0 || collected.size == BATCH_PER_PRESS) {
-                    onChunk(collected.size, BATCH_PER_PRESS, "Found ${collected.size}/$BATCH_PER_PRESS")
-                }
-            }
-
-            if (i >= links.size) {
-                // file exhausted → advance to the next file (wrap after the last)
-                fileIdx = (fileIdx + 1) % fileCount
-                if (fileIdx == 0) wrapped = true
-                lineInFile = 0
-                cursor = fileIdx * CcNewFeed.MAX_LINES_PER_FILE
-                filesVisited++
-            } else {
-                // batch full mid-file — leave the cursor exactly where we stopped
-                break
-            }
+        // Interleave vless / vmess so the mix is even (vless, vmess, vless …).
+        val interleaved = ArrayList<ServerConfig>(vlessOut.size + vmessOut.size)
+        val max = maxOf(vlessOut.size, vmessOut.size)
+        for (i in 0 until max) {
+            if (i < vlessOut.size) interleaved.add(vlessOut[i])
+            if (i < vmessOut.size) interleaved.add(vmessOut[i])
         }
 
-        // Persist the advanced cursor + the Server N counter.
-        p.edit().putInt(KEY_CURSOR, cursor).putInt(KEY_NAME_COUNTER, serverIndex).apply()
+        // Assign monotonic Server N names in final (interleaved) order.
+        val named = interleaved.map { cfg ->
+            serverIndex++
+            cfg.copy(remark = "${ConfigFetcher.GENERIC_PREFIX} $serverIndex")
+        }
 
-        onChunk(collected.size, BATCH_PER_PRESS, "Added ${collected.size} configs")
-        Log.i(TAG, "press: +${collected.size} (raw $rawConsumed, cursor→$cursor, wrapped=$wrapped)")
-        Batch(collected, rawConsumed, wrapped)
+        // Persist cursors + name counter + the seen memory.
+        p.edit()
+            .putInt(KEY_VLESS_CURSOR, vlessCursor)
+            .putInt(KEY_VMESS_CURSOR, vmessCursor)
+            .putInt(KEY_NAME_COUNTER, serverIndex)
+            .apply()
+        SeenConfigStore.save(ctx, seenKeys)
+
+        onChunk(named.size, BATCH_PER_PRESS, "Added ${named.size} configs")
+        Log.i(TAG, "press: +${named.size} (vless=${vlessOut.size}, vmess=${vmessOut.size}, " +
+            "vlessCursor→$vlessCursor, vmessCursor→$vmessCursor)")
+        Batch(named, named.size, reachedEnd = false)
+    }
+
+    /**
+     * Fill [out] with up to [need] unique configs of one [kind], walking [sources]
+     * from [startCursor] forward (wrapping), fetching at most
+     * [MAX_SOURCES_PER_PRESS] feeds. Returns the NEXT cursor to resume from.
+     */
+    private suspend fun collectKind(
+        ctx: Context,
+        sources: List<LiveSources.Src>,
+        startCursor: Int,
+        need: Int,
+        seenKeys: MutableSet<String>,
+        out: MutableList<ServerConfig>
+    ): Int {
+        if (sources.isEmpty()) return startCursor
+        var cursor = ((startCursor % sources.size) + sources.size) % sources.size
+        var sourcesWalked = 0
+        while (out.size < need && sourcesWalked < MAX_SOURCES_PER_PRESS && sourcesWalked < sources.size) {
+            val src = sources[cursor]
+            val body = try { SourceFetcher.fetch(src.url) } catch (_: Throwable) { null }
+            if (!body.isNullOrBlank()) {
+                val links = try { SourceFetcher.extractLinks(body, src.kind) } catch (_: Throwable) { emptyList() }
+                for (link in links) {
+                    if (out.size >= need) break
+                    val cfg = try { ConfigParser.parseSingleSafe(link) } catch (_: Throwable) { null } ?: continue
+                    if (cfg.protocol != "vless" && cfg.protocol != "vmess") continue
+                    val key = ConfigParser.dedupKey(cfg)
+                    if (!seenKeys.add(key)) continue
+                    out.add(cfg)
+                }
+            }
+            // advance to next source (wrap), whether or not it filled the quota
+            cursor = (cursor + 1) % sources.size
+            sourcesWalked++
+        }
+        return cursor
     }
 }

@@ -74,9 +74,13 @@ object Pinger {
      * endpoint being briefly down can never fake a pass or fake a fail.
      */
     private val PROBE_URLS = listOf(
-        "https://cp.cloudflare.com/generate_204",        // Cloudflare edge (filtered, tiny 204)
+        // v4.6 — ordered strongest-first for Iran. Telegram + Cloudflare give the
+        // most trustworthy real-connect signal (they answer fast AND are genuinely
+        // filtered), Instagram is a third confirmation. Google is deliberately
+        // absent (it's reachable without a working tunnel, so it proves nothing).
+        "https://core.telegram.org/robots.txt",          // Telegram (blocked target, fast)
         "https://www.cloudflare.com/cdn-cgi/trace",      // Cloudflare trace (filtered, tiny body)
-        "https://core.telegram.org/robots.txt",          // Telegram (blocked target)
+        "https://cp.cloudflare.com/generate_204",        // Cloudflare edge (filtered, tiny 204)
         "https://i.instagram.com/favicon.ico"            // Instagram (blocked target)
     )
 

@@ -11,7 +11,7 @@
     <string name="tab_home">HOME</string>
     <string name="configs">MY CONFIGS</string>
     <string name="free_configs">FREE</string>
-    <string name="sponsor_configs">SPONSOR</string>
+    <string name="sponsor_configs">DONATE</string>
 
     <string name="connected">CONNECTED</string>
     <string name="connecting">CONNECTING…</string>
@@ -53,7 +53,7 @@
 
     <!-- ===== Free Configs screen ===== -->
     <string name="free_title">FREE CONFIGS</string>
-    <string name="free_hint">Curated VLESS / VMESS configs — 120 added per search.</string>
+    <string name="free_hint">Curated VLESS / VMESS configs — 240 added per search (120 + 120).</string>
     <string name="start_search">START SEARCH</string>
     <string name="searching">SEARCHING…</string>
     <string name="delete_all">DELETE ALL</string>
@@ -160,4 +160,18 @@
     <!-- ===== v4.0 — Splash (UI sheet screen 01) ===== -->
     <string name="splash_brand">PROFESSOR VPN</string>
     <string name="splash_tagline">Secure · Fast · Unlimited</string>
+
+    <!-- ===== v4.6 — Donate / support screen ===== -->
+    <string name="donate_title">SUPPORT US</string>
+    <string name="donate_heading">Support the project</string>
+    <string name="donate_note">Your donation keeps the servers running and the app free for everyone.</string>
+    <string name="donate_empty">Donation options will appear here soon.</string>
+    <string name="donate_copy">Copy</string>
+    <string name="donate_copied">Address copied</string>
+
+    <!-- ===== v4.6 — Home Telegram channel button ===== -->
+    <string name="join_telegram">Join our Telegram channel</string>
+
+    <!-- ===== v4.6 — Auto Test probe page ===== -->
+    <string name="autotest_probe_title">Testing your connection…</string>
 </resources>

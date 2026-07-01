@@ -58,10 +58,10 @@ class ConnectFragment : Fragment() {
     private var appLogo: ImageView? = null
     private var telegramIcon: View? = null
 
-    // Protocol segmented tabs (cosmetic selector reflecting the active config).
-    private var protoVless: TextView? = null
-    private var protoVmess: TextView? = null
-    private var protoXray: TextView? = null
+    // v4.6 — Telegram-channel CTA button (replaces the old protocol tags).
+    private var homeCta: View? = null
+    private var homeCtaLabel: TextView? = null
+    @Volatile private var ctaUrl: String = ""
 
     // Connection / data-usage / ip summary row.
     private var statConnection: TextView? = null
@@ -88,6 +88,7 @@ class ConnectFragment : Fragment() {
         activity?.runOnUiThread {
             bindLogo(cfg.appLogoUrl)
             telegramUrl = cfg.homeTelegramUrl
+            bindCta(cfg)
         }
     }
 
@@ -124,9 +125,8 @@ class ConnectFragment : Fragment() {
         appLogo = view.findViewById(R.id.app_logo)
         telegramIcon = view.findViewById(R.id.telegram_icon)
 
-        protoVless = view.findViewById(R.id.proto_vless)
-        protoVmess = view.findViewById(R.id.proto_vmess)
-        protoXray = view.findViewById(R.id.proto_xray)
+        homeCta = view.findViewById(R.id.home_cta)
+        homeCtaLabel = view.findViewById(R.id.home_cta_label)
 
         statConnection = view.findViewById(R.id.stat_connection_value)
         statData = view.findViewById(R.id.stat_data_value)
@@ -160,6 +160,10 @@ class ConnectFragment : Fragment() {
         view.findViewById<View?>(R.id.qa_protocol)?.setOnClickListener {
             (activity as? MainActivity)?.showConfigsTab()
         }
+
+        // v4.6 — Telegram-channel CTA button under the connect pill.
+        homeCta?.setOnClickListener { openCta() }
+        bindCta(RemoteConfigStore.current())
 
         startToggleStateMachine()
 
@@ -345,22 +349,32 @@ class ConnectFragment : Fragment() {
         }
     }
 
-    /** Highlight the segmented tab matching the selected config's protocol. */
-    private fun updateProtoTabs(protocol: String?) {
-        val p = protocol?.lowercase() ?: ""
-        val active = themeColor(R.attr.appTextPrimary)
-        val dim = themeColor(R.attr.appTextSecondary)
-        val white = 0xFFFFFFFF.toInt()
-        val isVless = p.contains("vless")
-        val isVmess = p.contains("vmess")
-        val isXray = !isVless && !isVmess && p.isNotEmpty()
-        protoVless?.isSelected = isVless
-        protoVmess?.isSelected = isVmess
-        protoXray?.isSelected = isXray || (!isVless && !isVmess)
-        protoVless?.setTextColor(if (isVless) white else dim)
-        protoVmess?.setTextColor(if (isVmess) white else dim)
-        protoXray?.setTextColor(if (protoXray?.isSelected == true) white else dim)
-        if (protocol == null) { protoVless?.isSelected = true; protoVless?.setTextColor(white); protoXray?.isSelected = false; protoXray?.setTextColor(dim) }
+    /** v4.6 — the protocol segmented tags were removed; this is now a no-op. */
+    private fun updateProtoTabs(protocol: String?) { /* removed in v4.6 */ }
+
+    /** Bind the Home CTA button (label per-language + admin url). */
+    private fun bindCta(cfg: RemoteConfig) {
+        val cta = cfg.homeCta
+        if (!cta.enabled) { homeCta?.visibility = View.GONE; return }
+        homeCta?.visibility = View.VISIBLE
+        val lang = com.neonvpn.app.util.AppPrefs.getLanguage(requireContext())
+        val isFa = lang == com.neonvpn.app.util.AppPrefs.LANG_FA
+        val custom = if (isFa) cta.labelFa else cta.labelEn
+        homeCtaLabel?.text = if (custom.isNotBlank()) custom else getString(R.string.join_telegram)
+        ctaUrl = cta.url.ifBlank { cfg.homeTelegramUrl }
+    }
+
+    /** Open the CTA link (admin url, falling back to the in-app Telegram link). */
+    private fun openCta() {
+        val url = ctaUrl.ifBlank { RemoteConfigStore.cachedTelegramUrl(requireContext()) }.trim()
+        if (url.isBlank()) return
+        try {
+            startActivity(
+                android.content.Intent(
+                    android.content.Intent.ACTION_VIEW, android.net.Uri.parse(url)
+                ).apply { addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK) }
+            )
+        } catch (_: Throwable) { }
     }
 
     private fun renderStats(s: VpnStats) {

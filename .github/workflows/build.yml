@@ -1,0 +1,98 @@
+name: Build Professor VPN APK
+
+# Builds a single signed UNIVERSAL release APK (all ABIs) and publishes it both
+# as a workflow artifact and (on tag / manual dispatch) as a GitHub Release asset.
+# Version is read straight from app/build.gradle.kts so the file name always
+# matches versionName (currently 4.6).
+
+on:
+  push:
+    branches: [ main, genspark_ai_developer ]
+    paths:
+      - "app/**"
+      - "gradle/**"
+      - "*.gradle.kts"
+      - "gradle.properties"
+      - ".github/workflows/build.yml"
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+concurrency:
+  group: build-apk-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Cache Gradle
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ runner.os }}-${{ hashFiles('**/*.gradle*', 'gradle/wrapper/gradle-wrapper.properties') }}
+          restore-keys: gradle-${{ runner.os }}-
+
+      - name: Read version name
+        id: ver
+        run: |
+          VN=$(grep -E 'versionName\s*=' app/build.gradle.kts | head -1 | sed -E 's/.*"([^"]+)".*/\1/')
+          echo "versionName=$VN" >> "$GITHUB_OUTPUT"
+          echo "Building Professor VPN v$VN"
+
+      - name: Make gradlew executable
+        run: chmod +x ./gradlew
+
+      - name: Build signed release APK
+        env:
+          # Optional CI signing secrets. When unset, gradle falls back to the
+          # bundled dev key (see app/build.gradle.kts signingConfigs.release),
+          # so the build always succeeds and updates install over prior builds.
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: ./gradlew :app:assembleRelease --no-daemon --stacktrace
+
+      - name: Locate & rename APK
+        id: apk
+        run: |
+          set -e
+          SRC=$(find app/build/outputs/apk/release -name "*.apk" | head -1)
+          echo "Found: $SRC"
+          OUT="ProfessorVPN-v${{ steps.ver.outputs.versionName }}-universal.apk"
+          mkdir -p dist
+          cp "$SRC" "dist/$OUT"
+          echo "path=dist/$OUT" >> "$GITHUB_OUTPUT"
+          echo "name=$OUT" >> "$GITHUB_OUTPUT"
+          ls -la dist/
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.apk.outputs.name }}
+          path: ${{ steps.apk.outputs.path }}
+          if-no-files-found: error
+
+      - name: Publish GitHub Release
+        if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.ver.outputs.versionName }}
+          name: Professor VPN v${{ steps.ver.outputs.versionName }}
+          files: ${{ steps.apk.outputs.path }}
+          fail_on_unmatched_files: true

@@ -70,8 +70,8 @@ object AutoTestEngine {
 
     private const val TAG = "AutoTestEngine"
 
-    /** How many configs we fetch + test per cycle. */
-    const val BATCH = 120
+    /** How many configs we fetch + test per cycle (120 vless + 120 vmess). */
+    const val BATCH = FreeConfigSource.BATCH_PER_PRESS   // 240
 
     /**
      * v4.2 — ADAPTIVE concurrency. On a strong phone we run more probes in
@@ -155,13 +155,24 @@ object AutoTestEngine {
             val totalWorking = AtomicInteger(0)
             _progress.value = Progress(running = true, cycle = 0, phase = "Starting…")
 
-            // dedup keys for the rolling free list (snapshot under store lock).
+            // dedup keys — seeded from the PERSISTENT seen-memory (survives
+            // restarts, bounded so the cache never bloats) PLUS whatever is
+            // already showing in the free list. This is what guarantees a config
+            // added before is never re-added.
             val seenKeys = HashSet<String>()
+            runCatching { seenKeys.addAll(SeenConfigStore.load(appCtx)) }
             runCatching {
                 freeStore.get().forEach { seenKeys.add(ConfigParser.dedupKey(it)) }
             }
+            runCatching { ConfigStore(appCtx).getServers().forEach { seenKeys.add(ConfigParser.dedupKey(it)) } }
 
+            // ensureFreshState also honours the 30-day reset (clears seen memory
+            // + restarts source cursors); re-seed the in-memory set afterwards.
             runCatching { FreeConfigSource.ensureFreshState(appCtx) }
+            runCatching {
+                val after = SeenConfigStore.load(appCtx)
+                if (after.isEmpty()) seenKeys.clear()   // reset just happened
+            }
 
             while (isActive) {
                 cycle++

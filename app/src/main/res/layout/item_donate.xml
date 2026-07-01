@@ -1,0 +1,70 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Donate row: [logo] · [coin + address] · [copy] -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="horizontal"
+    android:gravity="center_vertical"
+    android:background="@drawable/card_server"
+    android:padding="14dp"
+    android:layout_marginBottom="12dp">
+
+    <!-- LEFT: coin logo -->
+    <ImageView
+        android:id="@+id/coin_logo"
+        android:layout_width="42dp"
+        android:layout_height="42dp"
+        android:contentDescription="@string/donate_title" />
+
+    <!-- CENTER: coin name + address -->
+    <LinearLayout
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_weight="1"
+        android:orientation="vertical"
+        android:layout_marginStart="14dp"
+        android:layout_marginEnd="10dp">
+
+        <TextView
+            android:id="@+id/coin_name"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="USDT"
+            android:textColor="@color/violet_bright"
+            android:textSize="12sp"
+            android:textStyle="bold"
+            android:letterSpacing="0.04" />
+
+        <TextView
+            android:id="@+id/coin_address"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text=""
+            android:textColor="?attr/appTextPrimary"
+            android:textSize="12sp"
+            android:maxLines="2"
+            android:ellipsize="middle"
+            android:fontFamily="monospace"
+            android:layout_marginTop="3dp" />
+    </LinearLayout>
+
+    <!-- RIGHT: copy button -->
+    <FrameLayout
+        android:id="@+id/btn_copy"
+        android:layout_width="44dp"
+        android:layout_height="44dp"
+        android:background="@drawable/quick_action_bg"
+        android:clickable="true"
+        android:focusable="true"
+        android:foreground="?attr/selectableItemBackgroundBorderless">
+
+        <ImageView
+            android:layout_width="20dp"
+            android:layout_height="20dp"
+            android:layout_gravity="center"
+            android:src="@drawable/ic_copy"
+            app:tint="@color/violet_bright"
+            xmlns:app="http://schemas.android.com/apk/res-auto"
+            android:contentDescription="@string/donate_copy" />
+    </FrameLayout>
+</LinearLayout>

@@ -1,971 +1,509 @@
-/* Professor VPN — Admin Console (v3.0)
- * Fully client-side. No credentials live in this source: only SHA-256 hashes
- * of the username/password are stored, so reading this file never reveals
- * them. The GitHub token is entered at runtime and kept ONLY in the browser's
- * localStorage — never committed.
+/* Professor VPN — Admin Console (v4.6)
+ * Fully client-side, static panel. No plaintext credentials live in this file:
+ * only SHA-256 digests of the username/password are stored, so reading this
+ * source never reveals them. The GitHub token is entered at runtime and kept
+ * ONLY in the browser's localStorage — never committed.
  *
  * Publishing model:
- *   - app_config.json is written to prfgame/prf-VPN @ adminpanel/app_config.json
- *   - The Android app + the download website both read that file (with
- *     cache-busting) and pick up changes live, no restart required.
- *   - Uploaded images/GIFs are committed as binary blobs into
+ *   - app_config.json is written to  aptixzero/PRF_VPN @ adminpanel/app_config.json
+ *     (a PUBLIC path) so the Android app can fetch it via raw.githubusercontent.
+ *   - The panel HTML/JS itself lives in the PRIVATE repo.
+ *   - Uploaded banner images are committed as binary blobs into
  *     adminpanel/media/ and referenced by their raw.githubusercontent URL.
+ *
+ * Config schema produced here matches RemoteConfig.kt exactly:
+ *   version, appLogo{url}, inAppTelegramUrl, contact{...}, appBanner{...},
+ *   ad{...}, homeCta{enabled,labelFa,labelEn,url},
+ *   homeBanner{enabled,imageUrl,text,textColor,url},
+ *   donate{enabled,heading,note,items:[{id,coin,address,logoUrl,network}]}
  */
 (function () {
   "use strict";
 
-  // Login is verified by comparing SHA-256 of typed input against these
-  // digests. The plaintext credentials are NOT present anywhere in source.
+  /* ---------------------------------------------------------------- auth --- */
+  // Login is verified by comparing SHA-256 of the typed input against these
+  // digests. Plaintext credentials (prf / prf!123) are NOT present in source.
   var USER_HASH = "9e7b69b83de60d8771bad1cceace73a97986da02e74fde20f913ea96be71bf6c";
   var PASS_HASH = "c751b1388c0f70e1a104d47f945bd888cdde69fd414b48fa3c4be5b7d73e9e7d";
 
-  var LS_AUTH = "pv_auth";
+  var LS_AUTH  = "pv_auth";
   var LS_TOKEN = "pv_gh_token";
-  var DEFAULT_CONFIG_URL =
-    "https://raw.githubusercontent.com/prfgame/prf-VPN/main/adminpanel/app_config.json";
+  var LS_CFG   = "pv_cfg_cache";
 
+  // The PUBLIC repo/path the app reads. Publishing writes here.
+  var PUB_REPO = "aptixzero/PRF_VPN";
+  var PUB_PATH = "adminpanel/app_config.json";
+  var CONFIG_URL =
+    "https://raw.githubusercontent.com/" + PUB_REPO + "/main/" + PUB_PATH;
+
+  // Anonymous aggregate counter (matches UserStatsReporter.kt).
+  var COUNTER_NS = "professorvpn";
+  var ONLINE_WINDOW_MS = 5 * 60 * 1000;
+
+  /* ---------------------------------------------------------------- utils -- */
   var $ = function (id) { return document.getElementById(id); };
   var val = function (id) { var e = $(id); return e ? e.value : ""; };
   var trimv = function (id) { return (val(id) || "").trim(); };
-  var checked = function (id) { var e = $(id); return e ? e.checked : false; };
+  var checked = function (id) { var e = $(id); return !!(e && e.checked); };
+  var setVal = function (id, v) { var e = $(id); if (e) e.value = (v == null ? "" : v); };
+  var setChk = function (id, v) { var e = $(id); if (e) e.checked = !!v; };
 
-  async function sha256(text) {
-    var buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
-    return Array.from(new Uint8Array(buf))
+  function esc(s) {
+    return String(s == null ? "" : s)
+      .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;");
+  }
+
+  async function sha256(str) {
+    var buf = new TextEncoder().encode(str);
+    var hash = await crypto.subtle.digest("SHA-256", buf);
+    return Array.from(new Uint8Array(hash))
       .map(function (b) { return b.toString(16).padStart(2, "0"); })
       .join("");
   }
 
-  function setStatus(msg, cls) {
-    var s = $("status");
-    if (!s) return;
-    s.textContent = msg;
-    s.className = "status" + (cls ? " " + cls : "");
+  var toastTimer = null;
+  function toast(msg) {
+    var t = $("toast");
+    if (!t) return;
+    t.textContent = msg;
+    t.classList.add("show");
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(function () { t.classList.remove("show"); }, 2600);
   }
 
-  // ---------------------------------------------------------------- model
+  /* ------------------------------------------------------------ the model -- */
+  // Custom donate rows added by the operator (preset rows are handled inline).
+  var customDonate = [];
+
   function defaultModel() {
     return {
       version: 1,
-      // App-side banner (shown only inside the Android app)
-      appBanner: {
-        enabled: true,
-        title: "محل تبلیغ شما",
-        subtitle: "جهت ثبت تبلیغ با ما در ارتباط باشید",
-        bgColor: "#0B0B0F",
-        textColor: "#F4F2FB",
-        imageUrl: "",
-        mediaVisible: true,
-        action: "contact",
-        actionUrl: ""
-      },
-      // Website-side banner (shown only on the download page)
-      websiteBanner: {
-        enabled: true,
-        title: "محل تبلیغ شما",
-        subtitle: "جهت ثبت تبلیغ با ما در ارتباط باشید",
-        imageUrl: "",
-        mediaVisible: true,
-        action: "contact",
-        actionUrl: ""
-      },
+      latestApkVersion: "4.6",
       appLogo: { url: "" },
-      websiteLogo: { url: "" },
-      sponsor: {
-        enabled: true,
-        heading: "",
-        note: "",
-        items: []   // [{ id, title, text, imageUrl, link, protocol }]
-      },
+      inAppTelegramUrl: "",
       contact: {
         text: "جهت ثبت تبلیغات و استعلام قیمت بنر به آیدی زیر در تلگرام پیام دهید:",
         telegramId: "@mx_pr",
-        telegramUrl: "https://t.me/mx_pr",
-        btnCopy: "کپی آیدی",
-        btnSend: "ارسال پیام"
+        telegramUrl: "https://t.me/mx_pr"
       },
-      // "In-App Telegram Link" — the channel the home-screen Telegram icon opens.
-      inAppTelegramUrl: "",
-      // Legacy block — mirror of appBanner so old app builds keep working.
-      ad: {
-        enabled: true,
-        title: "محل تبلیغ شما",
-        subtitle: "جهت ثبت تبلیغ با ما در ارتباط باشید",
-        bgColor: "#0B0B0F",
-        textColor: "#F4F2FB",
-        imageUrl: "",
-        action: "contact",
-        actionUrl: ""
-      }
-    };
-  }
-
-  // ---------------------------------------------------------------- read form
-  function readForm() {
-    var appBanner = {
-      enabled: checked("ab_enabled"),
-      title: trimv("ab_title"),
-      subtitle: trimv("ab_subtitle"),
-      bgColor: (trimv("ab_bg_hex") || "#0B0B0F"),
-      textColor: (trimv("ab_text_hex") || "#F4F2FB"),
-      imageUrl: trimv("ab_image"),
-      mediaVisible: checked("ab_media_visible"),
-      action: val("ab_action") || "contact",
-      actionUrl: trimv("ab_action_url")
-    };
-    var websiteBanner = {
-      enabled: checked("wb_enabled"),
-      title: trimv("wb_title"),
-      subtitle: trimv("wb_subtitle"),
-      imageUrl: trimv("wb_image"),
-      mediaVisible: checked("wb_media_visible"),
-      action: val("wb_action") || "contact",
-      actionUrl: trimv("wb_action_url")
-    };
-    return {
-      version: (window.__ver || 0) + 1,
-      // Monotonic publish timestamp — lets every live consumer (app + site)
-      // detect a fresh publish instantly even if the CDN serves a cached copy.
-      ts: Date.now(),
-      // §5 — human-readable last-update stamp shown in the panel after Save.
-      lastUpdatedAt: Date.now(),
-      // §5 — latest published APK version, auto-filled from the version field so
-      // the download page / app can reference the current release.
-      latestApkVersion: (trimv("latest_apk_version") || "3.8"),
-      appBanner: appBanner,
-      websiteBanner: websiteBanner,
-      appLogo: { url: trimv("app_logo") },
-      websiteLogo: { url: trimv("web_logo") },
-      // In-app Telegram link (home-screen Telegram icon). Published both as a
-      // flat field and a nested object so any app build can read it.
-      inAppTelegramUrl: trimv("c_inapp_tg"),
-      inAppTelegram: { url: trimv("c_inapp_tg") },
-      sponsor: {
-        enabled: checked("sp_enabled"),
-        heading: trimv("sp_heading"),
-        note: trimv("sp_note"),
-        items: readSponsorItems()
+      appBanner: {
+        enabled: true, title: "", subtitle: "",
+        bgColor: "#11161C", textColor: "#E6F2EC",
+        imageUrl: "", action: "url", actionUrl: ""
       },
-      contact: {
-        text: trimv("c_text"),
-        telegramId: trimv("c_tg_id"),
-        telegramUrl: trimv("c_tg_url"),
-        btnCopy: trimv("c_btn_copy") || "کپی آیدی",
-        btnSend: trimv("c_btn_send") || "ارسال پیام"
-      },
-      // Legacy mirror of appBanner for backward compatibility.
-      ad: {
-        enabled: appBanner.enabled,
-        title: appBanner.title,
-        subtitle: appBanner.subtitle,
-        bgColor: appBanner.bgColor,
-        textColor: appBanner.textColor,
-        imageUrl: appBanner.mediaVisible ? appBanner.imageUrl : "",
-        action: appBanner.action,
-        actionUrl: appBanner.actionUrl
-      }
+      homeCta: { enabled: true, labelFa: "", labelEn: "", url: "" },
+      homeBanner: { enabled: true, imageUrl: "", text: "", textColor: "#E6F2EC", url: "" },
+      donate: { enabled: true, heading: "", note: "", items: [] }
     };
   }
 
-  // ---------------------------------------------------------------- write form
-  function setVal(id, v) { var e = $(id); if (e) e.value = v == null ? "" : v; }
-  function setChk(id, v) { var e = $(id); if (e) e.checked = !!v; }
-
-  function writeForm(m) {
-    window.__ver = m.version || 0;
-    var verBadge = $("ver-badge");
-    if (verBadge) verBadge.textContent = "v" + (m.version || 0);
-
-    var ab = m.appBanner || {};
-    setChk("ab_enabled", ab.enabled !== false);
-    setVal("ab_title", ab.title);
-    setVal("ab_subtitle", ab.subtitle);
-    setVal("ab_bg_hex", ab.bgColor || "#0B0B0F");
-    setVal("ab_bg_color", toColorInput(ab.bgColor || "#0B0B0F"));
-    setVal("ab_text_hex", ab.textColor || "#F4F2FB");
-    setVal("ab_text_color", toColorInput(ab.textColor || "#F4F2FB"));
-    setVal("ab_image", ab.imageUrl);
-    setChk("ab_media_visible", ab.mediaVisible !== false);
-    setVal("ab_action", ab.action || "contact");
-    setVal("ab_action_url", ab.actionUrl);
-
-    var wb = m.websiteBanner || {};
-    setChk("wb_enabled", wb.enabled !== false);
-    setVal("wb_title", wb.title);
-    setVal("wb_subtitle", wb.subtitle);
-    setVal("wb_image", wb.imageUrl);
-    setChk("wb_media_visible", wb.mediaVisible !== false);
-    setVal("wb_action", wb.action || "contact");
-    setVal("wb_action_url", wb.actionUrl);
-
-    setVal("app_logo", (m.appLogo || {}).url);
-    setVal("web_logo", (m.websiteLogo || {}).url);
-
-    var sp = m.sponsor || {};
-    setChk("sp_enabled", sp.enabled !== false);
-    setVal("sp_heading", sp.heading);
-    setVal("sp_note", sp.note);
-    renderSponsorItems(Array.isArray(sp.items) ? sp.items : []);
-
-    var c = m.contact || {};
-    setVal("c_text", c.text);
-    setVal("c_tg_id", c.telegramId);
-    setVal("c_tg_url", c.telegramUrl);
-    setVal("c_inapp_tg", m.inAppTelegramUrl || (m.inAppTelegram && m.inAppTelegram.url) || "");
-    setVal("c_btn_copy", c.btnCopy || "کپی آیدی");
-    setVal("c_btn_send", c.btnSend || "ارسال پیام");
-
-    // §5 — release/download metadata
-    setVal("latest_apk_version", m.latestApkVersion || "3.8");
-    var lu = $("last-updated");
-    if (lu) {
-      if (m.lastUpdatedAt) {
-        lu.textContent = "آخرین بروزرسانی: " + new Date(m.lastUpdatedAt).toLocaleString();
-      } else {
-        lu.textContent = "";
+  /* -------------------------------------------------------- form <-> model - */
+  // Fill the form fields from a parsed config object (used when we load the
+  // currently-published config so the operator edits the real values).
+  function applyToForm(cfg) {
+    cfg = cfg || {};
+    // links tab
+    setVal("ln-inapp", cfg.inAppTelegramUrl || (cfg.inAppTelegram && cfg.inAppTelegram.url) || "");
+    var cta = cfg.homeCta || {};
+    setChk("cta-enabled", cta.enabled !== false);
+    setVal("cta-fa", cta.labelFa || "");
+    setVal("cta-en", cta.labelEn || "");
+    setVal("cta-url", cta.url || "");
+    var ct = cfg.contact || {};
+    setVal("ct-id", ct.telegramId || "");
+    setVal("ct-url", ct.telegramUrl || "");
+    // home tab
+    setVal("app-logo", (cfg.appLogo && cfg.appLogo.url) || cfg.appLogoUrl || "");
+    var bn = cfg.homeBanner || {};
+    setChk("bn-enabled", bn.enabled !== false);
+    setVal("bn-image", bn.imageUrl || "");
+    setVal("bn-text", bn.text || "");
+    if (bn.textColor) setVal("bn-color", bn.textColor);
+    setVal("bn-url", bn.url || "");
+    setVal("hm-apk", cfg.latestApkVersion || "4.6");
+    // donate tab
+    var dn = cfg.donate || {};
+    setVal("dn-heading", dn.heading || "");
+    setVal("dn-note", dn.note || "");
+    customDonate = [];
+    var items = (dn.items || []);
+    ["usdt", "trx", "ton", "btc"].forEach(function (net) {
+      var found = items.filter(function (x) { return x.network === net; })[0];
+      setChk("p-" + net + "-on", !!found);
+      setVal("p-" + net + "-addr", found ? found.address : "");
+    });
+    items.forEach(function (x) {
+      if (["usdt", "trx", "ton", "btc"].indexOf(x.network) < 0) {
+        customDonate.push({ coin: x.coin || x.network, address: x.address || "", logoUrl: x.logoUrl || "" });
       }
-    }
-
-    // keep the purple header Telegram quick-link in sync with the live link
-    var tg = $("tg_icon");
-    if (tg && c.telegramUrl) tg.setAttribute("href", c.telegramUrl);
-
-    toggleUrlWrap("ab");
-    toggleUrlWrap("wb");
-    refreshAllThumbs();
-    updatePreview();
-    updateJsonOut();
-  }
-
-  function toColorInput(hex) {
-    var h = (hex || "").trim();
-    return /^#[0-9a-fA-F]{6}$/.test(h) ? h : "#0b0b0f";
-  }
-
-  function toggleUrlWrap(prefix) {
-    var wrap = $(prefix + "_url_wrap");
-    var sel = $(prefix + "_action");
-    if (wrap && sel) wrap.classList.toggle("hidden", sel.value !== "url");
-  }
-
-  // ---------------------------------------------------------------- thumbs
-  function setThumb(imgId, phId, url) {
-    var img = $(imgId), ph = $(phId);
-    if (!img || !ph) return;
-    if (url) {
-      img.src = url;
-      img.classList.remove("hidden");
-      ph.classList.add("hidden");
-    } else {
-      img.removeAttribute("src");
-      img.classList.add("hidden");
-      ph.classList.remove("hidden");
-    }
-  }
-
-  function refreshAllThumbs() {
-    setThumb("ab_thumb", "ab_ph", trimv("ab_image"));
-    setThumb("wb_thumb", "wb_ph", trimv("wb_image"));
-    setThumb("al_thumb", "al_ph", trimv("app_logo"));
-    setThumb("wl_thumb", "wl_ph", trimv("web_logo"));
-  }
-
-  // ---------------------------------------------------- sponsor config items
-  // Detect the protocol of a raw share link (vless/vmess only). Anything else
-  // is rejected so the app never receives an unsupported sponsor config.
-  function detectProto(link) {
-    var s = (link || "").trim().toLowerCase();
-    if (s.indexOf("vless://") === 0) return "vless";
-    if (s.indexOf("vmess://") === 0) return "vmess";
-    return "";
-  }
-
-  // Read all sponsor item rows back into a clean array, dropping invalid links.
-  function readSponsorItems() {
-    var out = [];
-    var rows = document.querySelectorAll("#sp_items .sp-item");
-    rows.forEach(function (row, i) {
-      var link = (row.querySelector(".sp-link").value || "").trim();
-      var proto = detectProto(link);
-      if (!link || !proto) return;   // skip empty / unsupported safely
-      out.push({
-        id: row.getAttribute("data-id") || ("sp_" + Date.now() + "_" + i),
-        title: (row.querySelector(".sp-title").value || "").trim() || ("Sponsor " + (i + 1)),
-        text: (row.querySelector(".sp-text").value || "").trim(),
-        imageUrl: (row.querySelector(".sp-image").value || "").trim(),
-        link: link,
-        protocol: proto
-      });
     });
-    return out;
+    renderCustom();
   }
 
-  function sponsorItemTemplate(item, i) {
-    var id = item.id || ("sp_" + Date.now() + "_" + i);
-    var proto = item.protocol || detectProto(item.link) || "?";
-    var div = document.createElement("div");
-    div.className = "sp-item";
-    div.setAttribute("data-id", id);
-    div.innerHTML =
-      '<div class="sp-head">' +
-        '<span class="idx">کانفیگ ' + (i + 1) + '</span>' +
-        '<span class="proto">' + proto.toUpperCase() + '</span>' +
-        '<span class="spacer"></span>' +
-        '<button class="btn btn-danger btn-sm sp-del">حذف</button>' +
-      '</div>' +
-      '<label>عنوان نمایشی</label>' +
-      '<input class="sp-title" type="text" value="">' +
-      '<label>متن تبلیغ (اختیاری)</label>' +
-      '<input class="sp-text" type="text" value="">' +
-      '<label>لینک کانفیگ (vless:// یا vmess://) — فقط داخلی، به کاربر نشان داده نمی‌شود</label>' +
-      '<input class="sp-link" type="text" placeholder="vless://… یا vmess://…" value="">' +
-      '<label>تصویر / گیف (اختیاری)</label>' +
-      '<div class="media">' +
-        '<div class="thumb"><img class="sp-thumb hidden"><span class="ph sp-ph">بدون مدیا</span></div>' +
-        '<div class="ctl">' +
-          '<input class="sp-image" type="text" placeholder="آدرس تصویر/گیف یا آپلود">' +
-          '<div class="btns">' +
-            '<button class="btn btn-ghost btn-sm sp-upload">⬆ آپلود مدیا</button>' +
-            '<button class="btn btn-danger btn-sm sp-img-remove">حذف مدیا</button>' +
-          '</div>' +
-        '</div>' +
-        '<input class="sp-file" type="file" accept="image/png,image/jpeg,image/webp,image/gif" class="hidden" style="display:none">' +
-      '</div>';
-    // fill values safely (avoids HTML injection via innerHTML)
-    div.querySelector(".sp-title").value = item.title || "";
-    div.querySelector(".sp-text").value = item.text || "";
-    div.querySelector(".sp-link").value = item.link || "";
-    div.querySelector(".sp-image").value = item.imageUrl || "";
-    wireSponsorItem(div);
-    return div;
-  }
+  // Read the form fields into a fresh config object matching RemoteConfig.kt.
+  function readForm(prevVersion) {
+    var m = defaultModel();
+    m.version = (prevVersion || 0) + 1;
+    m.ts = Date.now();
+    m.lastUpdatedAt = Date.now();
+    m.latestApkVersion = trimv("hm-apk") || "4.6";
 
-  function wireSponsorItem(row) {
-    var linkEl = row.querySelector(".sp-link");
-    var protoEl = row.querySelector(".proto");
-    var imgEl = row.querySelector(".sp-image");
-    var thumb = row.querySelector(".sp-thumb");
-    var ph = row.querySelector(".sp-ph");
+    var inapp = trimv("ln-inapp");
+    m.inAppTelegramUrl = inapp;
+    m.inAppTelegram = { url: inapp };
 
-    function refreshThumb() {
-      var url = (imgEl.value || "").trim();
-      if (url) { thumb.src = url; thumb.classList.remove("hidden"); ph.classList.add("hidden"); }
-      else { thumb.removeAttribute("src"); thumb.classList.add("hidden"); ph.classList.remove("hidden"); }
-    }
-    function refreshProto() {
-      var p = detectProto(linkEl.value);
-      protoEl.textContent = (p || "?").toUpperCase();
-      protoEl.style.color = p ? "var(--violet2)" : "var(--red)";
-    }
+    m.appLogo = { url: trimv("app-logo") };
 
-    linkEl.addEventListener("input", function () { refreshProto(); updateJsonOut(); });
-    [".sp-title", ".sp-text"].forEach(function (sel) {
-      row.querySelector(sel).addEventListener("input", updateJsonOut);
-    });
-    imgEl.addEventListener("input", function () { refreshThumb(); updateJsonOut(); });
+    m.contact.telegramId = trimv("ct-id") || m.contact.telegramId;
+    m.contact.telegramUrl = trimv("ct-url") || m.contact.telegramUrl;
 
-    row.querySelector(".sp-del").addEventListener("click", function (e) {
-      e.preventDefault();
-      row.parentNode.removeChild(row);
-      renumberSponsorItems();
-      updateJsonOut();
-    });
-    row.querySelector(".sp-img-remove").addEventListener("click", function (e) {
-      e.preventDefault(); imgEl.value = ""; refreshThumb(); updateJsonOut();
-    });
-
-    var fileEl = row.querySelector(".sp-file");
-    row.querySelector(".sp-upload").addEventListener("click", function (e) {
-      e.preventDefault(); fileEl.click();
-    });
-    fileEl.addEventListener("change", async function () {
-      var f = fileEl.files && fileEl.files[0];
-      if (!f) return;
-      try {
-        var url = await uploadMedia(f, "sponsor");
-        imgEl.value = url; refreshThumb();
-        setStatus("✓ مدیا آپلود شد — اکنون «انتشار» را بزنید تا زنده شود", "ok");
-        updateJsonOut();
-      } catch (err) {
-        setStatus("خطا در آپلود: " + err.message, "bad");
-      } finally { fileEl.value = ""; }
-    });
-
-    refreshProto();
-    refreshThumb();
-  }
-
-  function renumberSponsorItems() {
-    var rows = document.querySelectorAll("#sp_items .sp-item");
-    rows.forEach(function (row, i) {
-      var idx = row.querySelector(".idx");
-      if (idx) idx.textContent = "کانفیگ " + (i + 1);
-    });
-    var box = $("sp_items");
-    if (box && rows.length === 0) {
-      box.innerHTML = '<div class="sp-empty">هنوز کانفیگ اسپانسری اضافه نشده است.</div>';
-    }
-  }
-
-  function renderSponsorItems(items) {
-    var box = $("sp_items");
-    if (!box) return;
-    box.innerHTML = "";
-    (items || []).forEach(function (it, i) { box.appendChild(sponsorItemTemplate(it, i)); });
-    renumberSponsorItems();
-  }
-
-  function addSponsorItem() {
-    var box = $("sp_items");
-    if (!box) return;
-    var empty = box.querySelector(".sp-empty");
-    if (empty) box.removeChild(empty);
-    var i = box.querySelectorAll(".sp-item").length;
-    box.appendChild(sponsorItemTemplate({ id: "sp_" + Date.now() + "_" + i }, i));
-    renumberSponsorItems();
-    updateJsonOut();
-  }
-
-  // ---------------------------------------------------------------- preview
-  function updatePreview() {
-    // ---- App preview (phone mockup) ----
-    var abEnabled = checked("ab_enabled");
-    var abMedia = checked("ab_media_visible");
-    var bg = trimv("ab_bg_hex") || "#0B0B0F";
-    var fg = trimv("ab_text_hex") || "#F4F2FB";
-    var banner = $("pv_banner");
-    if (banner) {
-      banner.style.background = bg;
-      banner.style.color = fg;
-      banner.style.borderColor = "rgba(255,255,255,.12)";
-      banner.style.opacity = abEnabled ? "1" : "0.32";
-    }
-    var pvTitle = $("pv_title"), pvSub = $("pv_subtitle"), pvImg = $("pv_img");
-    if (pvTitle) { pvTitle.style.color = fg; pvTitle.textContent = trimv("ab_title") || "محل تبلیغ شما"; }
-    if (pvSub) { pvSub.style.color = fg; pvSub.textContent = trimv("ab_subtitle"); }
-    var abImg = trimv("ab_image");
-    if (pvImg) {
-      if (abImg && abMedia) {
-        pvImg.src = abImg; pvImg.classList.remove("hidden");
-        if (pvTitle) pvTitle.classList.add("hidden");
-        if (pvSub) pvSub.classList.add("hidden");
-      } else {
-        pvImg.classList.add("hidden");
-        if (pvTitle) pvTitle.classList.remove("hidden");
-        if (pvSub) pvSub.classList.remove("hidden");
-      }
-    }
-    var appLogoUrl = trimv("app_logo");
-    var pvLogo = $("pv_logo");
-    if (pvLogo) {
-      if (appLogoUrl) { pvLogo.src = appLogoUrl; pvLogo.style.display = "block"; }
-      else pvLogo.style.display = "none";
-    }
-
-    // ---- Website preview ----
-    var wbEnabled = checked("wb_enabled");
-    var wbMedia = checked("wb_media_visible");
-    var wpvBanner = $("wpv_banner");
-    if (wpvBanner) wpvBanner.style.opacity = wbEnabled ? "1" : "0.32";
-    var wpvTitle = $("wpv_title"), wpvSub = $("wpv_subtitle"), wpvImg = $("wpv_img");
-    if (wpvTitle) wpvTitle.textContent = trimv("wb_title") || "محل تبلیغ شما";
-    if (wpvSub) wpvSub.textContent = trimv("wb_subtitle");
-    var wbImg = trimv("wb_image");
-    if (wpvImg) {
-      if (wbImg && wbMedia) {
-        wpvImg.src = wbImg; wpvImg.classList.remove("hidden");
-        if (wpvTitle) wpvTitle.classList.add("hidden");
-        if (wpvSub) wpvSub.classList.add("hidden");
-      } else {
-        wpvImg.classList.add("hidden");
-        if (wpvTitle) wpvTitle.classList.remove("hidden");
-        if (wpvSub) wpvSub.classList.remove("hidden");
-      }
-    }
-    var webLogoUrl = trimv("web_logo");
-    var wpvLogo = $("wpv_logo");
-    if (wpvLogo) {
-      if (webLogoUrl) { wpvLogo.src = webLogoUrl; wpvLogo.style.display = "block"; }
-      else wpvLogo.style.display = "none";
-    }
-
-    refreshAllThumbs();
-  }
-
-  function updateJsonOut() {
-    var out = $("json_out");
-    if (out) out.value = JSON.stringify(readForm(), null, 2);
-  }
-
-  // ---------------------------------------------------------------- github
-  function ghHeaders(token) {
-    return {
-      Authorization: "token " + token,
-      Accept: "application/vnd.github+json"
+    m.homeCta = {
+      enabled: checked("cta-enabled"),
+      labelFa: trimv("cta-fa"),
+      labelEn: trimv("cta-en"),
+      url: trimv("cta-url")
     };
-  }
 
-  function b64encodeUtf8(str) {
-    return btoa(unescape(encodeURIComponent(str)));
-  }
-  function b64decodeUtf8(b64) {
-    return decodeURIComponent(escape(atob((b64 || "").replace(/\n/g, ""))));
-  }
-
-  async function ghGetFile(repo, path, branch, token) {
-    var url = "https://api.github.com/repos/" + repo + "/contents/" +
-      encodeURI(path) + "?ref=" + encodeURIComponent(branch);
-    var res = await fetch(url, { headers: ghHeaders(token) });
-    if (res.status === 404) return { sha: null, content: null };
-    if (!res.ok) throw new Error("GET " + res.status);
-    var j = await res.json();
-    return { sha: j.sha, content: b64decodeUtf8(j.content) };
-  }
-
-  async function ghPutFile(repo, path, branch, token, base64Content, sha, message) {
-    var url = "https://api.github.com/repos/" + repo + "/contents/" + encodeURI(path);
-    var body = {
-      message: message || "chore: update from admin console",
-      content: base64Content,
-      branch: branch
+    m.homeBanner = {
+      enabled: checked("bn-enabled"),
+      imageUrl: trimv("bn-image"),
+      text: trimv("bn-text"),
+      textColor: trimv("bn-color") || "#E6F2EC",
+      url: trimv("bn-url")
     };
-    if (sha) body.sha = sha;
-    var res = await fetch(url, {
-      method: "PUT",
-      headers: ghHeaders(token),
-      body: JSON.stringify(body)
-    });
-    if (!res.ok) {
-      var t = await res.text();
-      throw new Error("PUT " + res.status + " " + t);
-    }
-    return res.json();
-  }
+    // keep the legacy appBanner/ad blocks in sync so older app builds still work
+    m.appBanner = {
+      enabled: m.homeBanner.enabled,
+      title: "", subtitle: "",
+      bgColor: "#11161C", textColor: m.homeBanner.textColor,
+      imageUrl: m.homeBanner.imageUrl,
+      action: m.homeBanner.url ? "url" : "contact",
+      actionUrl: m.homeBanner.url
+    };
+    m.ad = JSON.parse(JSON.stringify(m.appBanner));
 
-  // Read a File into base64 (raw binary, no data: prefix).
-  function fileToBase64(file) {
-    return new Promise(function (resolve, reject) {
-      var r = new FileReader();
-      r.onload = function () {
-        var s = r.result || "";
-        var comma = s.indexOf(",");
-        resolve(comma >= 0 ? s.slice(comma + 1) : s);
-      };
-      r.onerror = reject;
-      r.readAsDataURL(file);
-    });
-  }
-
-  function extFor(file) {
-    var t = (file.type || "").toLowerCase();
-    if (t.indexOf("gif") >= 0) return "gif";
-    if (t.indexOf("png") >= 0) return "png";
-    if (t.indexOf("webp") >= 0) return "webp";
-    if (t.indexOf("jpeg") >= 0 || t.indexOf("jpg") >= 0) return "jpg";
-    var n = (file.name || "").toLowerCase();
-    var m = n.match(/\.(gif|png|webp|jpe?g)$/);
-    return m ? m[1].replace("jpeg", "jpg") : "png";
-  }
-
-  // Upload a media file as a binary blob to adminpanel/media/, return raw URL.
-  async function uploadMedia(file, kind) {
-    var token = trimv("gh_token") || localStorage.getItem(LS_TOKEN) || "";
-    var repo = trimv("gh_repo") || "prfgame/prf-VPN";
-    var branch = trimv("gh_branch") || "main";
-    if (!token) throw new Error("ابتدا توکن گیت‌هاب را در تب «انتشار» وارد کنید");
-    if (file.size > 9 * 1024 * 1024) throw new Error("حجم فایل باید کمتر از ۹ مگابایت باشد");
-
-    var ts = Date.now();
-    var ext = extFor(file);
-    var path = "adminpanel/media/" + kind + "_" + ts + "." + ext;
-    var b64 = await fileToBase64(file);
-
-    setStatus("در حال آپلود مدیا…");
-    var existing = { sha: null };
-    try { existing = await ghGetFile(repo, path, branch, token); } catch (e) { existing = { sha: null }; }
-    await ghPutFile(repo, path, branch, token, b64, existing.sha, "chore: upload media " + path);
-
-    // Raw URL with cache-buster so previews/live consumers refresh immediately.
-    var raw = "https://raw.githubusercontent.com/" + repo + "/" + branch + "/" + path;
-    return raw + "?v=" + ts;
-  }
-
-  // §4.2/§5 — validate the In-App Telegram Link. Must be empty (allowed: falls
-  // back to contact link) or a real https://t.me/ or https://telegram.me/ URL.
-  function isValidTelegramUrl(u) {
-    if (!u) return true; // empty is allowed (app falls back to contact link)
-    return /^https:\/\/(t\.me|telegram\.me)\/[A-Za-z0-9_+/?=#%.\-]+$/i.test(u.trim());
-  }
-
-  // ---------------------------------------------------------------- publish
-  async function applyAndPublish() {
-    var token = trimv("gh_token");
-    var repo = trimv("gh_repo") || "prfgame/prf-VPN";
-    var branch = trimv("gh_branch") || "main";
-    var path = trimv("gh_path") || "adminpanel/app_config.json";
-    if (!token) { setStatus("توکن گیت‌هاب را وارد کنید (تب انتشار)", "bad"); return; }
-
-    // §4.2 — reject an invalid Telegram link BEFORE we touch the network so a
-    // bad value can never be published.
-    var tgUrl = trimv("c_inapp_tg");
-    if (!isValidTelegramUrl(tgUrl)) {
-      setStatus("لینک تلگرام نامعتبر است — باید با https://t.me/ یا https://telegram.me/ شروع شود", "bad");
-      var tgField = $("c_inapp_tg");
-      if (tgField) { tgField.focus(); tgField.classList.add("invalid"); }
-      return;
-    }
-    var tgFieldOk = $("c_inapp_tg");
-    if (tgFieldOk) tgFieldOk.classList.remove("invalid");
-
-    localStorage.setItem(LS_TOKEN, token);
-
-    var model = readForm();
-    // §5 — atomic save: build the full JSON once, then a single PUT writes it.
-    var json = JSON.stringify(model, null, 2);
-    var out = $("json_out");
-    if (out) out.value = json;
-
-    setStatus("در حال انتشار…");
-    try {
-      var existing = await ghGetFile(repo, path, branch, token);
-      await ghPutFile(repo, path, branch, token, b64encodeUtf8(json), existing.sha,
-        "chore: publish app_config v" + model.version);
-      window.__ver = model.version;
-      var verBadge = $("ver-badge");
-      if (verBadge) verBadge.textContent = "v" + model.version;
-      // §5 — "Saved ✓" + a human lastUpdatedAt stamp.
-      var stamp = new Date(model.lastUpdatedAt || Date.now());
-      setStatus("Saved ✓ — منتشر شد (نسخه " + model.version + " · " + stamp.toLocaleString() + ")", "ok");
-      var lu = $("last-updated");
-      if (lu) lu.textContent = "آخرین بروزرسانی: " + stamp.toLocaleString();
-    } catch (e) {
-      setStatus("خطا در انتشار: " + e.message, "bad");
-    }
-  }
-
-  async function reloadFromGithub() {
-    var token = localStorage.getItem(LS_TOKEN) || trimv("gh_token");
-    var repo = trimv("gh_repo") || "prfgame/prf-VPN";
-    var branch = trimv("gh_branch") || "main";
-    var path = trimv("gh_path") || "adminpanel/app_config.json";
-    setStatus("در حال بارگذاری…");
-    try {
-      var txt = null;
-      try {
-        var r = await fetch(DEFAULT_CONFIG_URL + "?t=" + Date.now(), { cache: "no-store" });
-        if (r.ok) txt = await r.text();
-      } catch (e) {}
-      if (!txt && token) {
-        var f = await ghGetFile(repo, path, branch, token);
-        txt = f.content;
-      }
-      if (txt) {
-        var parsed = JSON.parse(txt);
-        var m = migrate(parsed);
-        writeForm(m);
-        setStatus("✓ بارگذاری شد", "ok");
-      } else {
-        writeForm(defaultModel());
-        setStatus("فایلی یافت نشد — مقادیر پیش‌فرض بارگذاری شد", "");
-      }
-    } catch (e) {
-      writeForm(defaultModel());
-      setStatus("بارگذاری ناموفق: " + e.message, "bad");
-    }
-  }
-
-  // Merge a loaded config onto defaults, upgrading legacy `ad` → appBanner.
-  function migrate(parsed) {
-    var d = defaultModel();
-    var m = Object.assign({}, d, parsed || {});
-    m.version = parsed && parsed.version ? parsed.version : 0;
-
-    // appBanner: prefer explicit appBanner, fall back to legacy ad block.
-    if (parsed && parsed.appBanner) {
-      m.appBanner = Object.assign({}, d.appBanner, parsed.appBanner);
-    } else if (parsed && parsed.ad) {
-      m.appBanner = Object.assign({}, d.appBanner, {
-        enabled: parsed.ad.enabled !== false,
-        title: parsed.ad.title,
-        subtitle: parsed.ad.subtitle,
-        bgColor: parsed.ad.bgColor,
-        textColor: parsed.ad.textColor,
-        imageUrl: parsed.ad.imageUrl,
-        mediaVisible: !!parsed.ad.imageUrl,
-        action: parsed.ad.action,
-        actionUrl: parsed.ad.actionUrl
-      });
-    } else {
-      m.appBanner = Object.assign({}, d.appBanner);
-    }
-
-    m.websiteBanner = Object.assign({}, d.websiteBanner, (parsed && parsed.websiteBanner) || {});
-    m.appLogo = Object.assign({}, d.appLogo, (parsed && parsed.appLogo) || {});
-    m.websiteLogo = Object.assign({}, d.websiteLogo, (parsed && parsed.websiteLogo) || {});
-    // Sponsor: new shape is { enabled, heading, note, items[] }. Upgrade the
-    // legacy single-card shape ({title,text,imageUrl,url}) into one item if it
-    // carried a real config link; otherwise start with an empty list.
-    var ps = (parsed && parsed.sponsor) || {};
+    // donate items — presets first (only when enabled AND address present)
     var items = [];
-    if (Array.isArray(ps.items)) {
-      items = ps.items.filter(function (it) {
-        return it && (detectProto(it.link) !== "");
-      }).map(function (it, i) {
-        return {
-          id: it.id || ("sp_" + i),
-          title: it.title || ("Sponsor " + (i + 1)),
-          text: it.text || "",
-          imageUrl: it.imageUrl || "",
-          link: (it.link || "").trim(),
-          protocol: detectProto(it.link)
-        };
-      });
-    } else if (ps.url && detectProto(ps.url)) {
-      items = [{
-        id: "sp_0", title: ps.title || "Sponsor 1", text: ps.text || "",
-        imageUrl: ps.imageUrl || "", link: ps.url.trim(), protocol: detectProto(ps.url)
-      }];
-    }
-    m.sponsor = {
-      enabled: ps.enabled !== false,
-      heading: ps.heading || "",
-      note: ps.note || "",
+    var presets = [
+      { net: "usdt", coin: "USDT (TRC20)" },
+      { net: "trx",  coin: "TRON (TRC20)" },
+      { net: "ton",  coin: "TON" },
+      { net: "btc",  coin: "Bitcoin" }
+    ];
+    presets.forEach(function (p) {
+      if (checked("p-" + p.net + "-on")) {
+        var addr = trimv("p-" + p.net + "-addr");
+        if (addr) items.push({ id: p.net, coin: p.coin, address: addr, logoUrl: "", network: p.net });
+      }
+    });
+    customDonate.forEach(function (c, i) {
+      if (c.address && c.coin) {
+        items.push({ id: "custom_" + i, coin: c.coin, address: c.address.trim(), logoUrl: c.logoUrl || "", network: "custom" });
+      }
+    });
+    m.donate = {
+      enabled: true,
+      heading: trimv("dn-heading"),
+      note: trimv("dn-note"),
       items: items
     };
-    m.contact = Object.assign({}, d.contact, (parsed && parsed.contact) || {});
-    // In-app Telegram link: accept flat field or nested object.
-    m.inAppTelegramUrl =
-      (parsed && parsed.inAppTelegramUrl) ||
-      (parsed && parsed.inAppTelegram && parsed.inAppTelegram.url) ||
-      "";
     return m;
   }
 
-  // ---------------------------------------------------------------- auth
-  async function tryLogin() {
-    var u = val("u");
-    var p = val("p");
-    var uh = await sha256(u);
-    var ph = await sha256(p);
-    if (uh === USER_HASH && ph === PASS_HASH) {
-      sessionStorage.setItem(LS_AUTH, "1");
-      showApp();
-    } else {
-      $("loginErr").textContent = "نام کاربری یا رمز نادرست است";
+  /* ----------------------------------------------------- custom donate UI -- */
+  function renderCustom() {
+    var box = $("custom-list");
+    if (!box) return;
+    if (!customDonate.length) { box.innerHTML = "<div class='small'>هنوز آدرس دلخواهی اضافه نشده.</div>"; return; }
+    box.innerHTML = customDonate.map(function (c, i) {
+      return "<div class='donate-row'>" +
+        "<div class='ico' style='background:#6d28d9'>◈</div>" +
+        "<div style='flex:1;min-width:0'>" +
+          "<div class='chip'>" + esc(c.coin) + "</div>" +
+          "<div class='addr' style='margin-top:6px'>" + esc(c.address) + "</div>" +
+        "</div>" +
+        "<span class='del-x' data-del='" + i + "'>حذف</span>" +
+      "</div>";
+    }).join("");
+    Array.prototype.forEach.call(box.querySelectorAll("[data-del]"), function (el) {
+      el.addEventListener("click", function () {
+        customDonate.splice(parseInt(el.getAttribute("data-del"), 10), 1);
+        renderCustom(); refreshPreview();
+      });
+    });
+  }
+
+  /* ------------------------------------------------------------- preview --- */
+  function refreshPreview() {
+    // CTA
+    var ctaEl = $("pv-cta"), lblEl = $("pv-cta-label");
+    if (ctaEl) ctaEl.style.display = checked("cta-enabled") ? "flex" : "none";
+    if (lblEl) lblEl.textContent = trimv("cta-fa") || "عضو کانال تلگرام شوید";
+    // banner
+    var bn = $("pv-banner");
+    if (bn) {
+      if (!checked("bn-enabled")) {
+        bn.style.display = "none";
+      } else {
+        bn.style.display = "flex";
+        var img = trimv("bn-image");
+        if (img) {
+          bn.innerHTML = "<img src='" + esc(img) + "' alt='' onerror=\"this.style.display='none'\"/>";
+          bn.style.color = "";
+        } else {
+          bn.innerHTML = esc(trimv("bn-text") || "محل بنر شما");
+          bn.style.color = trimv("bn-color") || "#E6F2EC";
+        }
+      }
     }
   }
 
-  function showApp() {
-    $("login").classList.add("hidden");
-    $("app").classList.remove("hidden");
-    var savedToken = localStorage.getItem(LS_TOKEN);
-    if (savedToken && $("gh_token")) $("gh_token").value = savedToken;
-    reloadFromGithub();
-    // load the privacy-first Users stats (default tab) and keep them fresh
-    startUsersAutoRefresh();
-  }
-
-  function logout() {
-    sessionStorage.removeItem(LS_AUTH);
-    location.reload();
-  }
-
-  // ---------------------------------------------------------------- users
-  // PRIVACY-FIRST aggregate stats. The app reports only opaque, non-reversible
-  // anonymous counts to a public aggregate-counter service (no PII, no IP, no
-  // device id, no location). Here we READ those integers and show:
-  //   • All     = lifetime distinct installs (counted once per install)
-  //   • Online  = distinct heartbeats in the current/previous 5-min window
-  //   • Offline = All − Online (never negative)
-  // Nothing per-user is ever fetched or shown — only aggregate totals.
-  var STATS_NS = "professorvpn";
-  var ONLINE_WINDOW_MS = 5 * 60 * 1000;
-  var usersTimer = null;
-
-  // Read a counter's current value WITHOUT incrementing it.
-  //
-  // IMPORTANT (CORS): counterapi.dev v1 only serves a clean, CORS-open response on
-  // the TRAILING-SLASH url ("…/key/"). The bare "…/key" returns 301 Moved
-  // Permanently, and the browser's follow-up to the redirect target is blocked by
-  // CORS (that was the console-error bug). The trailing slash returns the current
-  // {count} directly WITHOUT incrementing and WITH `access-control-allow-origin:*`.
-  // The v2 / abacus shapes 404 for our namespace, so we drop them.
-  async function readCounter(key) {
-    var safe = key.replace(/[^A-Za-z0-9_]/g, "");
+  /* ----------------------------------------------------------- tracking ---- */
+  async function counterValue(key) {
+    // counterapi v1 returns {"count":N}; the trailing-slash GET does NOT
+    // increment. Try the read path, then fall back to abacus.
     var urls = [
-      "https://api.counterapi.dev/v1/" + STATS_NS + "/" + safe + "/"  // trailing slash = CORS-clean read
+      "https://api.counterapi.dev/v1/" + COUNTER_NS + "/" + key + "/",
+      "https://abacus.jasoncameron.dev/get/" + COUNTER_NS + "/" + key
     ];
     for (var i = 0; i < urls.length; i++) {
       try {
-        var r = await fetch(urls[i] + "?t=" + Date.now(), { cache: "no-store" });
+        var r = await fetch(urls[i], { cache: "no-store" });
         if (!r.ok) continue;
         var j = await r.json();
-        var v = (j && (j.count != null ? j.count : (j.value != null ? j.value : null)));
-        if (v != null && !isNaN(v)) return Number(v);
-      } catch (e) { /* unreachable / blocked — fall through to 0 */ }
+        var v = (j && (j.count != null ? j.count : j.value));
+        if (v != null) return parseInt(v, 10) || 0;
+      } catch (e) { /* try next */ }
     }
-    return 0;
+    return null;
   }
 
-  function currentWindow() { return Math.floor(Date.now() / ONLINE_WINDOW_MS); }
+  async function loadStats() {
+    setVal; // no-op to satisfy lint
+    var allEl = $("st-all"), onEl = $("st-online"), offEl = $("st-offline");
+    if (allEl) allEl.textContent = "…";
+    if (onEl) onEl.innerHTML = "<span class='dot g'></span>…";
+    if (offEl) offEl.innerHTML = "<span class='dot r'></span>…";
 
-  async function loadUsers() {
-    var onlineEl = $("u_online"), offlineEl = $("u_offline"), allEl = $("u_all");
-    var upd = $("u_updated");
-    if (upd) upd.textContent = "در حال بارگذاری…";
+    var total = await counterValue("installs_total");
+    // Online = current window + previous window (covers the 5-min heartbeat gap).
+    var win = Math.floor(Date.now() / ONLINE_WINDOW_MS);
+    var cur = await counterValue("online_" + win);
+    var prev = await counterValue("online_" + (win - 1));
+    var online = (cur || 0) + (prev || 0);
 
-    // Keys are BARE (no namespace prefix) because the namespace is already
-    // STATS_NS ("professorvpn") — this matches exactly what the app reports, so
-    // /v1/professorvpn/installs_total/ and /v1/professorvpn/online_<w>/ resolve.
-    // Online = sum of the current and previous 5-minute window buckets (covers a
-    // user whose last heartbeat landed just before the boundary).
-    var w = currentWindow();
-    var results = await Promise.all([
-      readCounter("installs_total"),
-      readCounter("online_" + w),
-      readCounter("online_" + (w - 1))
-    ]);
-    var all = results[0] || 0;
-    var online = (results[1] || 0) + (results[2] || 0);
-    if (online > all) online = all;            // clamp — online can't exceed all
-    var offline = Math.max(0, all - online);
+    var totalTxt = (total == null ? "—" : String(total));
+    var onlineTxt = String(online);
+    var offlineTxt = (total == null ? "—" : String(Math.max(0, total - online)));
 
-    if (onlineEl) onlineEl.textContent = online.toLocaleString("fa-IR");
-    if (offlineEl) offlineEl.textContent = offline.toLocaleString("fa-IR");
-    if (allEl) allEl.textContent = all.toLocaleString("fa-IR");
-    if (upd) {
-      var t = new Date();
-      upd.textContent = "به‌روز شد " +
-        ("0" + t.getHours()).slice(-2) + ":" + ("0" + t.getMinutes()).slice(-2);
-    }
+    if (allEl) allEl.textContent = totalTxt;
+    if (onEl) onEl.innerHTML = "<span class='dot g'></span>" + onlineTxt;
+    if (offEl) offEl.innerHTML = "<span class='dot r'></span>" + offlineTxt;
+    var up = $("stats-updated");
+    if (up) up.textContent = "آخرین بروزرسانی: " + new Date().toLocaleTimeString("fa-IR");
   }
 
-  function startUsersAutoRefresh() {
-    if (usersTimer) return;
-    loadUsers();
-    usersTimer = setInterval(loadUsers, 60 * 1000); // refresh once a minute
+  /* ------------------------------------------------------------ GitHub ----- */
+  function b64EncodeUtf8(str) {
+    return btoa(unescape(encodeURIComponent(str)));
   }
 
-  // ---------------------------------------------------------------- wire
-  var TABS = ["users", "appb", "webb", "logos", "sponsor", "contact", "publish"];
-
-  function bindMediaUploader(fileId, btnId, removeId, textId, kind) {
-    var fileEl = $(fileId), btn = $(btnId), rm = $(removeId), txt = $(textId);
-    if (btn && fileEl) {
-      btn.addEventListener("click", function (e) { e.preventDefault(); fileEl.click(); });
-      fileEl.addEventListener("change", async function () {
-        var f = fileEl.files && fileEl.files[0];
-        if (!f) return;
-        try {
-          var url = await uploadMedia(f, kind);
-          if (txt) txt.value = url;
-          setStatus("✓ مدیا آپلود شد — اکنون «انتشار» را بزنید تا زنده شود", "ok");
-          updatePreview(); updateJsonOut();
-        } catch (err) {
-          setStatus("خطا در آپلود: " + err.message, "bad");
-        } finally {
-          fileEl.value = "";
-        }
+  async function ghGetSha(token, repo, path) {
+    var url = "https://api.github.com/repos/" + repo + "/contents/" + path;
+    try {
+      var r = await fetch(url + "?ref=main", {
+        headers: { Authorization: "token " + token, Accept: "application/vnd.github+json" },
+        cache: "no-store"
       });
+      if (r.status === 200) { var j = await r.json(); return j.sha || null; }
+    } catch (e) { /* new file */ }
+    return null;
+  }
+
+  async function ghPutFile(token, repo, path, contentB64, message, sha) {
+    var url = "https://api.github.com/repos/" + repo + "/contents/" + path;
+    var body = { message: message, content: contentB64, branch: "main" };
+    if (sha) body.sha = sha;
+    var r = await fetch(url, {
+      method: "PUT",
+      headers: {
+        Authorization: "token " + token,
+        Accept: "application/vnd.github+json",
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify(body)
+    });
+    if (!r.ok) {
+      var t = "";
+      try { t = (await r.json()).message || ""; } catch (e) {}
+      throw new Error("GitHub " + r.status + ": " + t);
     }
-    if (rm && txt) {
-      rm.addEventListener("click", function (e) {
-        e.preventDefault();
-        txt.value = "";
-        updatePreview(); updateJsonOut();
-      });
+    return await r.json();
+  }
+
+  // Upload the chosen banner file to adminpanel/media/ and return its raw URL.
+  async function uploadBannerFile(token, repo, file) {
+    var buf = await file.arrayBuffer();
+    var bytes = new Uint8Array(buf);
+    var bin = "";
+    for (var i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+    var b64 = btoa(bin);
+    var ext = (file.name.split(".").pop() || "png").toLowerCase().replace(/[^a-z0-9]/g, "");
+    var name = "banner_" + Date.now() + "." + ext;
+    var path = "adminpanel/media/" + name;
+    var sha = await ghGetSha(token, repo, path);
+    await ghPutFile(token, repo, path, b64, "panel: upload banner " + name, sha);
+    return "https://raw.githubusercontent.com/" + repo + "/main/" + path + "?v=" + Date.now();
+  }
+
+  async function publish() {
+    var token = trimv("pb-token");
+    var repo = trimv("pb-repo") || PUB_REPO;
+    var path = trimv("pb-path") || PUB_PATH;
+    var status = $("pb-status");
+    if (!token) { if (status) { status.style.color = "var(--red)"; status.textContent = "توکن گیت‌هاب را وارد کنید."; } return; }
+    localStorage.setItem(LS_TOKEN, token);
+
+    if (status) { status.style.color = "var(--dim)"; status.textContent = "در حال انتشار…"; }
+    try {
+      // If the operator picked a local banner file, upload it first.
+      var fileEl = $("bn-file");
+      if (fileEl && fileEl.files && fileEl.files[0]) {
+        if (status) status.textContent = "در حال آپلود عکس بنر…";
+        var rawUrl = await uploadBannerFile(token, repo, fileEl.files[0]);
+        setVal("bn-image", rawUrl);
+        toast("عکس بنر آپلود شد");
+      }
+
+      // read current version to bump it
+      var prevVersion = 0;
+      try {
+        var rr = await fetch(CONFIG_URL + "?t=" + Date.now(), { cache: "no-store" });
+        if (rr.ok) { var pc = await rr.json(); prevVersion = parseInt(pc.version, 10) || 0; }
+      } catch (e) {}
+
+      var model = readForm(prevVersion);
+      var json = JSON.stringify(model, null, 2);
+      $("pb-json").value = json;
+      localStorage.setItem(LS_CFG, json);
+
+      var sha = await ghGetSha(token, repo, path);
+      await ghPutFile(token, repo, path, b64EncodeUtf8(json), "panel: update app_config v" + model.version, sha);
+
+      if (status) { status.style.color = "var(--green)"; status.textContent = "✅ منتشر شد (نسخه " + model.version + "). برنامه در اجرای بعدی به‌روزرسانی می‌شود."; }
+      toast("تنظیمات منتشر شد ✅");
+    } catch (e) {
+      if (status) { status.style.color = "var(--red)"; status.textContent = "خطا: " + e.message; }
+      toast("خطا در انتشار");
+    }
+  }
+
+  function updateJsonPreview() {
+    var m = readForm(0);
+    var el = $("pb-json");
+    if (el) el.value = JSON.stringify(m, null, 2);
+  }
+
+  /* --------------------------------------------------------------- tabs ---- */
+  function showTab(name) {
+    Array.prototype.forEach.call(document.querySelectorAll(".tab"), function (t) {
+      t.classList.toggle("active", t.getAttribute("data-tab") === name);
+    });
+    ["tracking", "links", "home", "donate", "preview", "publish"].forEach(function (n) {
+      var s = $("tab-" + n);
+      if (s) s.classList.toggle("hidden", n !== name);
+    });
+    if (name === "tracking") loadStats();
+    if (name === "preview") refreshPreview();
+    if (name === "publish") updateJsonPreview();
+  }
+
+  /* --------------------------------------------------------------- boot ---- */
+  async function loadPublishedConfig() {
+    // Prefer the live published config; fall back to any local cache.
+    try {
+      var r = await fetch(CONFIG_URL + "?t=" + Date.now(), { cache: "no-store" });
+      if (r.ok) { var cfg = await r.json(); applyToForm(cfg); return; }
+    } catch (e) {}
+    var cached = localStorage.getItem(LS_CFG);
+    if (cached) { try { applyToForm(JSON.parse(cached)); return; } catch (e) {} }
+    applyToForm(defaultModel());
+  }
+
+  function enterApp() {
+    $("login").classList.add("hidden");
+    $("app").classList.remove("hidden");
+    var t = localStorage.getItem(LS_TOKEN);
+    if (t) setVal("pb-token", t);
+    loadPublishedConfig();
+    showTab("tracking");
+  }
+
+  async function doLogin() {
+    var u = trimv("lg-user"), p = val("lg-pass");
+    var err = $("lg-err");
+    var uh = await sha256(u), ph = await sha256(p);
+    if (uh === USER_HASH && ph === PASS_HASH) {
+      sessionStorage.setItem(LS_AUTH, "1");
+      if (err) err.textContent = "";
+      enterApp();
+    } else {
+      if (err) err.textContent = "نام کاربری یا رمز عبور اشتباه است.";
     }
   }
 
   function wire() {
-    $("loginBtn").addEventListener("click", tryLogin);
-    $("p").addEventListener("keydown", function (e) { if (e.key === "Enter") tryLogin(); });
-    $("logoutBtn").addEventListener("click", logout);
-    $("applyBtn").addEventListener("click", applyAndPublish);
-    $("reloadBtn").addEventListener("click", reloadFromGithub);
-
-    // tab switching
-    document.querySelectorAll(".tab").forEach(function (t) {
-      t.addEventListener("click", function () {
-        document.querySelectorAll(".tab").forEach(function (x) { x.classList.remove("active"); });
-        t.classList.add("active");
-        var name = t.getAttribute("data-tab");
-        TABS.forEach(function (n) {
-          var el = $("tab-" + n);
-          if (el) el.classList.toggle("hidden", n !== name);
-        });
-      });
+    // login
+    var lb = $("lg-btn");
+    if (lb) lb.addEventListener("click", doLogin);
+    ["lg-user", "lg-pass"].forEach(function (id) {
+      var e = $(id);
+      if (e) e.addEventListener("keydown", function (ev) { if (ev.key === "Enter") doLogin(); });
+    });
+    var lo = $("btn-logout");
+    if (lo) lo.addEventListener("click", function () {
+      sessionStorage.removeItem(LS_AUTH);
+      location.reload();
     });
 
-    // live preview/json bindings — text & toggles
-    var liveIds = [
-      "ab_enabled", "ab_title", "ab_subtitle", "ab_image", "ab_media_visible", "ab_action_url",
-      "wb_enabled", "wb_title", "wb_subtitle", "wb_image", "wb_media_visible", "wb_action_url",
-      "app_logo", "web_logo",
-      "sp_enabled", "sp_heading", "sp_note",
-      "c_text", "c_tg_id", "c_tg_url", "c_inapp_tg", "c_btn_copy", "c_btn_send"
-    ];
-    liveIds.forEach(function (id) {
-      var el = $(id);
-      if (!el) return;
-      el.addEventListener("input", function () { updatePreview(); updateJsonOut(); });
-      el.addEventListener("change", function () { updatePreview(); updateJsonOut(); });
+    // tabs
+    Array.prototype.forEach.call(document.querySelectorAll(".tab"), function (t) {
+      t.addEventListener("click", function () { showTab(t.getAttribute("data-tab")); });
     });
 
-    // live-sync the purple header Telegram link as the contact url is typed
-    var tgUrl = $("c_tg_url");
-    if (tgUrl) tgUrl.addEventListener("input", function () {
-      var tg = $("tg_icon");
-      if (tg && tgUrl.value.trim()) tg.setAttribute("href", tgUrl.value.trim());
+    // tracking
+    var rs = $("btn-refresh-stats");
+    if (rs) rs.addEventListener("click", loadStats);
+
+    // custom donate add
+    var ac = $("btn-add-custom");
+    if (ac) ac.addEventListener("click", function () {
+      var coin = trimv("cust-coin"), addr = trimv("cust-addr"), logo = trimv("cust-logo");
+      if (!coin || !addr) { toast("نام و آدرس را وارد کنید"); return; }
+      customDonate.push({ coin: coin, address: addr, logoUrl: logo });
+      setVal("cust-coin", ""); setVal("cust-addr", ""); setVal("cust-logo", "");
+      renderCustom(); refreshPreview();
+      toast("آدرس اضافه شد");
     });
 
-    // §4.2 — live validation of the In-App Telegram link; clear the red border
-    // as soon as the value becomes valid (or empty).
-    var inappTg = $("c_inapp_tg");
-    if (inappTg) inappTg.addEventListener("input", function () {
-      if (isValidTelegramUrl(inappTg.value)) inappTg.classList.remove("invalid");
-      else inappTg.classList.add("invalid");
+    // publish
+    var pb = $("btn-publish");
+    if (pb) pb.addEventListener("click", publish);
+
+    // live preview on relevant field changes
+    ["cta-enabled", "cta-fa", "bn-enabled", "bn-image", "bn-text", "bn-color"].forEach(function (id) {
+      var e = $(id);
+      if (e) { e.addEventListener("input", refreshPreview); e.addEventListener("change", refreshPreview); }
     });
 
-    // action selects → toggle url field
-    var ab = $("ab_action");
-    if (ab) ab.addEventListener("change", function () { toggleUrlWrap("ab"); updatePreview(); updateJsonOut(); });
-    var wb = $("wb_action");
-    if (wb) wb.addEventListener("change", function () { toggleUrlWrap("wb"); updatePreview(); updateJsonOut(); });
-
-    // color sync — app banner
-    bindColorPair("ab_bg_color", "ab_bg_hex");
-    bindColorPair("ab_text_color", "ab_text_hex");
-
-    // media uploaders
-    bindMediaUploader("ab_file", "ab_upload_btn", "ab_remove_btn", "ab_image", "appbanner");
-    bindMediaUploader("wb_file", "wb_upload_btn", "wb_remove_btn", "wb_image", "webbanner");
-    bindMediaUploader("al_file", "al_upload_btn", "al_remove_btn", "app_logo", "applogo");
-    bindMediaUploader("wl_file", "wl_upload_btn", "wl_remove_btn", "web_logo", "weblogo");
-
-    // sponsor: dynamic multi-item editor (each item wires itself; add button here)
-    var spAdd = $("sp_add_btn");
-    if (spAdd) spAdd.addEventListener("click", function (e) { e.preventDefault(); addSponsorItem(); });
-
-    // users: manual refresh of the privacy-first aggregate stats
-    var uRefresh = $("u_refresh");
-    if (uRefresh) uRefresh.addEventListener("click", function (e) { e.preventDefault(); loadUsers(); });
-
-    if (sessionStorage.getItem(LS_AUTH) === "1") showApp();
+    // resume session if already authed this tab
+    if (sessionStorage.getItem(LS_AUTH) === "1") enterApp();
   }
 
-  function bindColorPair(colorId, hexId) {
-    var c = $(colorId), h = $(hexId);
-    if (!c || !h) return;
-    c.addEventListener("input", function () {
-      h.value = c.value.toUpperCase();
-      updatePreview(); updateJsonOut();
-    });
-    h.addEventListener("input", function () {
-      c.value = toColorInput(h.value);
-      updatePreview(); updateJsonOut();
-    });
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", wire);
+  } else {
+    wire();
   }
-
-  document.addEventListener("DOMContentLoaded", wire);
 })();

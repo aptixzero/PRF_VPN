@@ -200,51 +200,38 @@
                 android:letterSpacing="0.18" />
         </FrameLayout>
 
-        <!-- ===== Protocol segmented tabs ===== -->
+        <!-- ===== v4.6 Telegram-channel CTA button (replaces proto tags) ===== -->
+        <!-- Deliberately a DIFFERENT colour from the connect pill so it never   -->
+        <!-- looks like the connect button. Label + link are admin-controlled.  -->
         <LinearLayout
+            android:id="@+id/home_cta"
             android:layout_width="match_parent"
-            android:layout_height="wrap_content"
+            android:layout_height="50dp"
             android:orientation="horizontal"
-            android:background="@drawable/seg_group_bg"
-            android:padding="4dp"
+            android:gravity="center"
             android:layout_marginTop="14dp"
-            android:weightSum="3">
+            android:background="@drawable/btn_cta_telegram"
+            android:clickable="true"
+            android:focusable="true"
+            android:foreground="?attr/selectableItemBackground">
+
+            <ImageView
+                android:layout_width="20dp"
+                android:layout_height="20dp"
+                android:src="@drawable/ic_telegram"
+                app:tint="#FFFFFFFF"
+                android:layout_marginEnd="9dp"
+                android:contentDescription="@string/join_telegram" />
 
             <TextView
-                android:id="@+id/proto_vless"
-                android:layout_width="0dp"
-                android:layout_height="38dp"
-                android:layout_weight="1"
-                android:gravity="center"
-                android:text="@string/proto_vless"
+                android:id="@+id/home_cta_label"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/join_telegram"
                 android:textColor="#FFFFFFFF"
-                android:textSize="12sp"
+                android:textSize="14sp"
                 android:textStyle="bold"
-                android:background="@drawable/seg_tab_bg" />
-
-            <TextView
-                android:id="@+id/proto_vmess"
-                android:layout_width="0dp"
-                android:layout_height="38dp"
-                android:layout_weight="1"
-                android:gravity="center"
-                android:text="@string/proto_vmess"
-                android:textColor="@color/text_secondary"
-                android:textSize="12sp"
-                android:textStyle="bold"
-                android:background="@drawable/seg_tab_bg" />
-
-            <TextView
-                android:id="@+id/proto_xray"
-                android:layout_width="0dp"
-                android:layout_height="38dp"
-                android:layout_weight="1"
-                android:gravity="center"
-                android:text="@string/proto_xray"
-                android:textColor="@color/text_secondary"
-                android:textSize="12sp"
-                android:textStyle="bold"
-                android:background="@drawable/seg_tab_bg" />
+                android:letterSpacing="0.02" />
         </LinearLayout>
 
         <!-- ===== Speed meter: download / upload / uptime ===== -->

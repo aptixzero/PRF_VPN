@@ -9,7 +9,7 @@
     <string name="tab_home">خانه</string>
     <string name="configs">کانفیگ‌های من</string>
     <string name="free_configs">رایگان</string>
-    <string name="sponsor_configs">اسپانسر</string>
+    <string name="sponsor_configs">حمایت</string>
 
     <string name="connected">متصل شد</string>
     <string name="connecting">در حال اتصال…</string>
@@ -138,4 +138,18 @@
 
     <!-- ===== v3.8 — Config feed ===== -->
     <string name="feed_unreachable_offline">منبع در دسترس نیست — نمایش کانفیگ‌های ذخیره‌شده</string>
+
+    <!-- ===== v4.6 — Donate / support screen ===== -->
+    <string name="donate_title">حمایت از ما</string>
+    <string name="donate_heading">از پروژه حمایت کنید</string>
+    <string name="donate_note">حمایت شما هزینه سرورها را تأمین می‌کند و برنامه را برای همه رایگان نگه می‌دارد.</string>
+    <string name="donate_empty">گزینه‌های حمایت به‌زودی اینجا نمایش داده می‌شوند.</string>
+    <string name="donate_copy">کپی</string>
+    <string name="donate_copied">آدرس کپی شد</string>
+
+    <!-- ===== v4.6 — Home Telegram channel button ===== -->
+    <string name="join_telegram">عضو کانال تلگرام شوید</string>
+
+    <!-- ===== v4.6 — Auto Test probe page ===== -->
+    <string name="autotest_probe_title">در حال تست اتصال شما…</string>
 </resources>

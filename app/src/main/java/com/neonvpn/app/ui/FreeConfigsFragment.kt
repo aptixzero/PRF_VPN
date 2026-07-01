@@ -116,7 +116,12 @@ class FreeConfigsFragment : Fragment() {
         recycler.adapter = adapter
 
         seenKeys.clear()
+        // v4.6 — seed dedup memory from the PERSISTENT seen-set (bounded, survives
+        // restarts) + everything already in the list + saved My-Configs, so a
+        // manual search never re-adds a config the user has already seen/added.
+        runCatching { seenKeys.addAll(com.neonvpn.app.config.SeenConfigStore.load(requireContext())) }
         initial.forEach { seenKeys.add(ConfigParser.dedupKey(it)) }
+        runCatching { myStore.getServers().forEach { seenKeys.add(ConfigParser.dedupKey(it)) } }
 
         PingService.hydrate(requireContext(), PingStore.FREE)
         observePingStatuses()
@@ -305,10 +310,12 @@ class FreeConfigsFragment : Fragment() {
         }
         if (busy) { job?.cancel(); setBusy(false); btnSearchLabel.text = getString(R.string.start_search) }
         if (adapter.selectMode) toggleSelectMode()
-        AutoTestEngine.start(requireContext())
-        btnAutoTest.text = getString(R.string.autotest_cancel)
-        showProgress(0, getString(R.string.autotest_collecting))
-        toast(getString(R.string.autotest_running))
+        // v4.6 — open the fast connectivity-probe page. It finds the first working
+        // vless+vmess, saves them, then starts the continuous engine itself. The
+        // engine banner + the CANCEL state below reflect it once it's running.
+        runCatching {
+            startActivity(android.content.Intent(requireContext(), AutoTestActivity::class.java))
+        }
     }
 
     // ------------------------------------------------------------- ping all

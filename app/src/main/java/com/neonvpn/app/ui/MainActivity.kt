@@ -28,8 +28,8 @@ class MainActivity : BaseActivity() {
     private val freeFragment: FreeConfigsFragment by lazy {
         supportFragmentManager.findFragmentByTag(TAG_FREE) as? FreeConfigsFragment ?: FreeConfigsFragment()
     }
-    private val sponsorFragment: SponsorConfigsFragment by lazy {
-        supportFragmentManager.findFragmentByTag(TAG_SPONSOR) as? SponsorConfigsFragment ?: SponsorConfigsFragment()
+    private val sponsorFragment: DonateFragment by lazy {
+        supportFragmentManager.findFragmentByTag(TAG_SPONSOR) as? DonateFragment ?: DonateFragment()
     }
 
     private lateinit var drawer: DrawerLayout

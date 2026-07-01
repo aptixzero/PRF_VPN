@@ -54,7 +54,31 @@ class AdBanner @JvmOverloads constructor(
     private var lastImageUrl: String? = null
 
     private val listener: (RemoteConfig) -> Unit = { cfg ->
-        post { bind(cfg.ad) }
+        post { bind(resolveBanner(cfg)) }
+    }
+
+    /**
+     * v4.6 — the bottom Home banner. Prefer the dedicated [RemoteConfig.homeBanner]
+     * (image OR coloured text + click url) when the operator has set it; otherwise
+     * fall back to the legacy [RemoteConfig.ad] block so old published configs
+     * keep working.
+     */
+    private fun resolveBanner(cfg: RemoteConfig): RemoteConfig.AdConfig {
+        val b = cfg.homeBanner
+        val hasContent = b.imageUrl.isNotBlank() || b.text.isNotBlank()
+        if (b.enabled && hasContent) {
+            return RemoteConfig.AdConfig(
+                enabled = true,
+                title = b.text,
+                subtitle = "",
+                bgColor = "#11161C",
+                textColor = b.textColor,
+                imageUrl = b.imageUrl,
+                action = if (b.url.isNotBlank()) RemoteConfig.ACTION_URL else RemoteConfig.ACTION_NONE,
+                actionUrl = b.url
+            )
+        }
+        return cfg.ad
     }
 
     init {
@@ -102,7 +126,7 @@ class AdBanner @JvmOverloads constructor(
                 outline.setRoundRect(0, 0, v.width, v.height, dp(16).toFloat())
             }
         }
-        bind(current)
+        bind(resolveBanner(RemoteConfigStore.current()))
     }
 
     override fun onAttachedToWindow() {

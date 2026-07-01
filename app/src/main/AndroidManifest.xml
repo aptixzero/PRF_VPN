@@ -52,6 +52,13 @@
             android:configChanges="orientation|screenSize|keyboardHidden|uiMode"
             android:parentActivityName=".ui.MainActivity" />
 
+        <!-- v4.6 Auto Test connectivity-probe page (progress bar only) -->
+        <activity
+            android:name=".ui.AutoTestActivity"
+            android:exported="false"
+            android:configChanges="orientation|screenSize|keyboardHidden|uiMode"
+            android:parentActivityName=".ui.MainActivity" />
+
         <!-- Real Android VpnService that builds the TUN interface -->
         <service
             android:name=".service.NeonVpnService"

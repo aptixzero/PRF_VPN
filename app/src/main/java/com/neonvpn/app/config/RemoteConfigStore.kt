@@ -44,7 +44,7 @@ object RemoteConfigStore {
      * (jsDelivr etc.) are appended automatically so it loads inside Iran.
      */
     const val REMOTE_URL =
-        "https://raw.githubusercontent.com/prfgame/prf-VPN/main/adminpanel/app_config.json"
+        "https://raw.githubusercontent.com/aptixzero/PRF_VPN/main/adminpanel/app_config.json"
 
     @Volatile private var cached: RemoteConfig = RemoteConfig.default()
     @Volatile private var loadedOnce = false

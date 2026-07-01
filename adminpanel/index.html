@@ -4,15 +4,14 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
 <meta name="robots" content="noindex,nofollow" />
-<!-- inline favicon (purple eye dot) so the host never 404s on /favicon.ico -->
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230b0810'/%3E%3Ccircle cx='16' cy='16' r='7' fill='%23a855f7'/%3E%3Ccircle cx='16' cy='16' r='3' fill='%23050507'/%3E%3C/svg%3E" />
-<title>Professor VPN · Control</title>
+<title>Professor VPN · Control 4.6</title>
 <style>
   :root{
     --bg:#040406; --bg2:#070709; --panel:rgba(18,16,26,.72); --panel2:rgba(26,22,38,.66);
     --line:rgba(255,255,255,.10); --line2:rgba(168,85,247,.45);
     --txt:#f4f2fb; --dim:#8a8597; --violet:#a855f7; --violet2:#c084fc; --violet-d:#6d28d9;
-    --green:#22ff9c; --red:#ff5b6e; --amber:#ffb020;
+    --green:#22ff9c; --red:#ff5b6e; --amber:#ffb020; --blue:#229ED9;
   }
   *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
   html,body{margin:0;padding:0;background:var(--bg);color:var(--txt);min-height:100vh;
@@ -27,7 +26,6 @@
   a{color:var(--violet2);text-decoration:none}
   .hidden{display:none!important}
 
-  /* ---------- login ---------- */
   #login{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:22px}
   .glass{background:var(--panel);border:1px solid var(--line);border-radius:22px;
     backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);
@@ -35,8 +33,7 @@
   .login-card{padding:30px 26px;width:100%;max-width:380px}
   .logo-dot{width:54px;height:54px;border-radius:16px;margin:0 auto 14px;
     background:radial-gradient(circle at 38% 32%,#2a1840,#0a0710);
-    border:1px solid var(--line2);position:relative;
-    box-shadow:0 0 40px rgba(168,85,247,.35)}
+    border:1px solid var(--line2);position:relative;box-shadow:0 0 40px rgba(168,85,247,.35)}
   .logo-dot::after{content:"";position:absolute;inset:30%;border-radius:50%;
     background:radial-gradient(circle,#c084fc,#7c3aed 70%);box-shadow:0 0 18px rgba(168,85,247,.7)}
   .brand{font-weight:900;font-size:21px;letter-spacing:.14em;text-align:center;color:var(--txt);
@@ -47,10 +44,7 @@
   input,textarea,select{width:100%;background:rgba(10,9,14,.85);border:1px solid var(--line);
     color:var(--txt);border-radius:13px;padding:12px 13px;font-size:14px;font-family:inherit;outline:none;
     transition:border-color .16s, box-shadow .16s}
-  input:focus,textarea:focus,select:focus{border-color:var(--violet);
-    box-shadow:0 0 0 3px rgba(168,85,247,.16)}
-  input.invalid,textarea.invalid{border-color:var(--red) !important;
-    box-shadow:0 0 0 3px rgba(239,68,68,.16) !important}
+  input:focus,textarea:focus,select:focus{border-color:var(--violet);box-shadow:0 0 0 3px rgba(168,85,247,.16)}
   textarea{resize:vertical;min-height:84px;line-height:1.8}
 
   .btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;cursor:pointer;border:none;
@@ -65,10 +59,8 @@
   .btn-sm{padding:8px 13px;font-size:12px;border-radius:10px}
   .err{color:var(--red);font-size:13px;text-align:center;margin-top:13px;min-height:18px}
 
-  /* ---------- shell ---------- */
   header{position:sticky;top:0;z-index:20;background:rgba(4,4,6,.82);
-    backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);
-    border-bottom:1px solid var(--line)}
+    backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);border-bottom:1px solid var(--line)}
   .hd{display:flex;align-items:center;gap:12px;max-width:1080px;margin:0 auto;padding:13px 18px}
   .hd .mini{width:30px;height:30px;border-radius:9px;background:radial-gradient(circle at 38% 32%,#2a1840,#0a0710);
     border:1px solid var(--line2);position:relative;box-shadow:0 0 18px rgba(168,85,247,.4)}
@@ -78,432 +70,281 @@
   .wrap{max-width:1080px;margin:0 auto;padding:18px}
 
   .tabs{display:flex;gap:8px;max-width:1080px;margin:0 auto;padding:0 18px 13px;flex-wrap:wrap}
-  .tab{cursor:pointer;padding:9px 15px;border-radius:12px;border:1px solid var(--line);
-    color:var(--dim);font-size:13px;font-weight:700;background:rgba(255,255,255,.02);transition:.15s}
-  .tab:hover{color:var(--txt);border-color:var(--line2)}
-  .tab.active{background:linear-gradient(135deg,rgba(168,85,247,.25),rgba(109,40,217,.18));
-    color:#fff;border-color:var(--line2);box-shadow:0 0 22px rgba(168,85,247,.22)}
+  .tab{cursor:pointer;padding:9px 15px;border-radius:12px;font-size:13px;font-weight:700;
+    background:rgba(255,255,255,.04);border:1px solid var(--line);color:var(--dim);transition:.14s}
+  .tab:hover{border-color:var(--line2);color:var(--txt)}
+  .tab.active{background:linear-gradient(135deg,var(--violet2),var(--violet-d));color:#fff;border-color:transparent;
+    box-shadow:0 6px 20px rgba(168,85,247,.4)}
 
-  .grid{display:grid;grid-template-columns:1.3fr .9fr;gap:18px;align-items:start}
-  @media(max-width:860px){.grid{grid-template-columns:1fr}}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:18px;padding:20px;margin-bottom:16px;
+    backdrop-filter:blur(12px)}
+  .card h3{margin:0 0 4px;font-size:16px}
+  .card .hint{color:var(--dim);font-size:12px;margin:0 0 14px;line-height:1.7}
+  .row{display:flex;gap:12px;flex-wrap:wrap}
+  .col{flex:1;min-width:220px}
+  .grid3{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:14px}
 
-  .sec{background:var(--panel);border:1px solid var(--line);border-radius:18px;padding:20px;margin-bottom:18px;
-    backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);
-    box-shadow:0 16px 50px rgba(0,0,0,.4), inset 0 1px 0 rgba(255,255,255,.04)}
-  .sec h3{margin:0 0 4px;font-size:15px;letter-spacing:.03em;display:flex;align-items:center;gap:8px}
-  .sec h3 .dot{width:8px;height:8px;border-radius:50%;background:var(--violet2);box-shadow:0 0 12px var(--violet)}
-  .sec p.hint{margin:0 0 15px;color:var(--dim);font-size:12px;line-height:1.7}
-  .row{display:flex;gap:14px;flex-wrap:wrap}
-  .row>div{flex:1;min-width:150px}
+  .stat{background:var(--panel2);border:1px solid var(--line);border-radius:16px;padding:20px;text-align:center}
+  .stat .n{font-size:34px;font-weight:900;line-height:1}
+  .stat .l{color:var(--dim);font-size:12px;margin-top:8px;letter-spacing:.1em}
+  .dot{display:inline-block;width:9px;height:9px;border-radius:50%;margin-inline-end:6px}
+  .dot.g{background:var(--green);box-shadow:0 0 10px var(--green)}
+  .dot.r{background:var(--red);box-shadow:0 0 10px var(--red)}
+  .dot.b{background:var(--blue);box-shadow:0 0 10px var(--blue)}
 
-  .switch{display:flex;align-items:center;gap:10px;margin:8px 0;cursor:pointer;user-select:none}
-  .switch input{width:auto;display:none}
-  .track{width:44px;height:25px;border-radius:13px;background:rgba(255,255,255,.1);
-    border:1px solid var(--line);position:relative;transition:.2s;flex:none}
-  .track::after{content:"";position:absolute;top:2px;right:2px;width:19px;height:19px;border-radius:50%;
-    background:#bbb;transition:.2s}
-  .switch input:checked + .track{background:linear-gradient(135deg,var(--violet2),var(--violet-d));border-color:var(--line2)}
-  .switch input:checked + .track::after{right:21px;background:#fff;box-shadow:0 0 10px rgba(168,85,247,.7)}
-  .switch .sl{font-size:13px;color:var(--txt)}
+  .switch{display:flex;align-items:center;gap:10px;cursor:pointer;user-select:none}
+  .switch input{display:none}
+  .track{width:44px;height:26px;border-radius:999px;background:rgba(255,255,255,.12);position:relative;transition:.2s}
+  .track::after{content:"";position:absolute;top:3px;inset-inline-start:3px;width:20px;height:20px;border-radius:50%;
+    background:#fff;transition:.2s}
+  .switch input:checked + .track{background:linear-gradient(135deg,var(--violet2),var(--violet-d))}
+  .switch input:checked + .track::after{inset-inline-start:21px}
 
-  .colorline{display:flex;gap:10px;align-items:center}
-  .colorline input[type=color]{width:50px;height:46px;padding:3px;border-radius:11px;flex:none;cursor:pointer}
-
-  /* media uploader */
-  .media{border:1px dashed var(--line2);border-radius:14px;padding:14px;background:rgba(168,85,247,.05);
-    display:flex;gap:14px;align-items:center;flex-wrap:wrap}
-  .media .thumb{width:96px;height:64px;border-radius:10px;background:rgba(0,0,0,.5);border:1px solid var(--line);
-    overflow:hidden;display:flex;align-items:center;justify-content:center;flex:none}
-  .media .thumb img{max-width:100%;max-height:100%;object-fit:contain}
-  .media .thumb .ph{font-size:10px;color:var(--dim)}
-  .media .ctl{display:flex;flex-direction:column;gap:8px;flex:1;min-width:160px}
-  .media .ctl .btns{display:flex;gap:8px;flex-wrap:wrap}
-  .upnote{font-size:10.5px;color:var(--dim);line-height:1.6}
+  .donate-row{display:flex;align-items:center;gap:12px;background:var(--panel2);border:1px solid var(--line);
+    border-radius:14px;padding:12px;margin-bottom:10px}
+  .donate-row .ico{width:36px;height:36px;border-radius:50%;flex:none;display:flex;align-items:center;justify-content:center;
+    font-weight:900;color:#fff;font-size:12px}
+  .donate-row .addr{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+    font-family:monospace;font-size:12px;color:var(--txt)}
+  .chip{font-size:11px;padding:3px 9px;border-radius:8px;background:rgba(168,85,247,.14);color:var(--violet2);font-weight:700}
 
   /* phone preview */
-  .preview-wrap{position:sticky;top:78px}
-  .phone{margin:0 auto;width:264px;background:#000;border:8px solid #15131c;border-radius:34px;
-    padding:14px 12px 20px;box-shadow:0 24px 70px rgba(0,0,0,.6), 0 0 50px rgba(168,85,247,.12)}
-  .phone .pbrand{text-align:center;font-weight:900;letter-spacing:.16em;color:#f4f2fb;font-size:15px;
-    text-shadow:0 0 18px rgba(168,85,247,.6)}
-  .phone .ptag{text-align:center;color:var(--violet2);font-size:7px;letter-spacing:.3em;margin-top:3px}
-  .phone .plogo{width:42px;height:42px;border-radius:12px;margin:8px auto 0;object-fit:cover;display:none}
-  .phone .eye{width:104px;height:104px;border-radius:50%;margin:14px auto;position:relative;
-    background:radial-gradient(circle at 40% 35%,#1a141f,#05070a 72%);
-    box-shadow:0 0 38px rgba(168,85,247,.3), inset 0 0 24px rgba(0,0,0,.6)}
-  .phone .eye::before{content:"";position:absolute;inset:20%;border-radius:50%;
-    background:radial-gradient(circle at 42% 38%,#c8a0ff,#7c3aed 60%,#3a1a6a)}
-  .phone .eye::after{content:"";position:absolute;left:50%;top:13%;transform:translateX(-50%);
-    width:11%;height:74%;border-radius:50%/40%;background:#040208}
-  .pv-banner{margin-top:12px;border-radius:13px;min-height:70px;border:1px solid rgba(255,255,255,.12);
-    display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;
-    padding:12px;overflow:hidden}
-  .pv-banner img{max-width:100%;max-height:64px;border-radius:8px}
-  .pv-banner .t{font-weight:800;font-size:13px}
-  .pv-banner .s{font-size:10px;opacity:.85;margin-top:4px}
-  .pv-label{text-align:center;color:var(--dim);font-size:11px;margin:14px 0 6px;letter-spacing:.1em}
+  .phone{width:300px;margin:0 auto;background:#050507;border:8px solid #17141f;border-radius:36px;
+    padding:16px 14px 22px;box-shadow:0 30px 80px rgba(0,0,0,.6)}
+  .p-brand{display:flex;align-items:center;gap:8px;margin-bottom:12px}
+  .p-tg{width:30px;height:30px;border-radius:9px;background:#141019;border:1px solid var(--line2);
+    display:flex;align-items:center;justify-content:center;color:var(--violet2);font-size:15px}
+  .p-orb{width:120px;height:120px;border-radius:50%;margin:14px auto;
+    background:radial-gradient(circle at 40% 35%,#3a2260,#0c0812);border:1px solid var(--line2);
+    box-shadow:0 0 40px rgba(168,85,247,.4)}
+  .p-connect{height:44px;border-radius:22px;background:linear-gradient(90deg,#7c3aed,#4c1d95);
+    display:flex;align-items:center;justify-content:center;color:#fff;font-weight:800;font-size:13px;letter-spacing:.1em}
+  .p-cta{height:40px;border-radius:12px;background:linear-gradient(90deg,#229ED9,#0088CC);margin-top:10px;
+    display:flex;align-items:center;justify-content:center;color:#fff;font-weight:800;font-size:12px;gap:6px}
+  .p-banner{height:78px;border-radius:12px;margin-top:12px;overflow:hidden;display:flex;align-items:center;
+    justify-content:center;background:#11161c;font-size:12px;text-align:center;padding:6px}
+  .p-banner img{width:100%;height:100%;object-fit:cover}
 
-  /* website preview */
-  .web-prev{background:#040406;border:1px solid var(--line);border-radius:14px;padding:16px;text-align:center}
-  .web-prev .wlogo{width:50px;height:50px;border-radius:14px;margin:0 auto 8px;object-fit:cover;display:none}
-  .web-prev .wbrand{font-weight:900;font-size:20px;letter-spacing:.05em;
-    text-shadow:0 0 16px rgba(168,85,247,.5)}
-  .web-prev .wb{margin-top:12px;border:1px solid var(--line);border-radius:12px;min-height:64px;
-    display:flex;flex-direction:column;align-items:center;justify-content:center;padding:12px;overflow:hidden}
-  .web-prev .wb img{max-width:100%;max-height:64px;border-radius:8px}
-
-  .json-box textarea{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11px;min-height:160px}
-  .status{margin-top:14px;font-size:13px;min-height:18px;text-align:center}
-  .status.ok{color:var(--green)} .status.bad{color:var(--red)}
-  .badge{display:inline-block;font-size:10px;color:var(--violet2);border:1px solid var(--line2);
-    border-radius:8px;padding:3px 9px;letter-spacing:.08em}
-
-  /* Telegram quick-link, top-left, PURPLE (never Telegram blue) */
-  .tg-icon{display:inline-flex;align-items:center;justify-content:center;width:32px;height:32px;
-    border-radius:10px;color:var(--violet2);
-    background:radial-gradient(circle at 38% 32%,rgba(168,85,247,.22),rgba(109,40,217,.12));
-    border:1px solid var(--line2);box-shadow:0 0 16px rgba(168,85,247,.35);
-    transition:.16s;flex:none;order:-1}
-  .tg-icon:hover{color:#fff;transform:translateY(-1px);box-shadow:0 0 22px rgba(168,85,247,.6)}
-
-  /* sponsor config items editor */
-  .sp-item{border:1px solid var(--line2);border-radius:14px;padding:14px;margin-bottom:12px;
-    background:rgba(168,85,247,.06);position:relative}
-  .sp-item .sp-head{display:flex;align-items:center;gap:10px;margin-bottom:10px}
-  .sp-item .sp-head .idx{font-size:12px;font-weight:800;color:var(--violet2);letter-spacing:.06em}
-  .sp-item .sp-head .proto{font-size:10px;color:var(--dim);border:1px solid var(--line);
-    border-radius:7px;padding:2px 8px}
-  .sp-item .sp-head .spacer{flex:1}
-  .sp-empty{color:var(--dim);font-size:12px;text-align:center;padding:14px;border:1px dashed var(--line);
-    border-radius:12px}
-
-  /* ---------- Users (privacy-first aggregate stats) ---------- */
-  .stat-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-top:6px}
-  @media(max-width:560px){.stat-grid{grid-template-columns:1fr}}
-  .stat-card{position:relative;border:1px solid var(--line);border-radius:16px;padding:20px 16px;
-    background:linear-gradient(160deg,rgba(168,85,247,.10),rgba(10,9,14,.55));
-    box-shadow:0 14px 40px rgba(0,0,0,.4), inset 0 1px 0 rgba(255,255,255,.04);overflow:hidden}
-  .stat-card::after{content:"";position:absolute;inset:-40% -20% auto auto;width:120px;height:120px;
-    background:radial-gradient(circle,rgba(168,85,247,.28),transparent 70%);filter:blur(6px)}
-  .stat-card .sk{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--dim);letter-spacing:.08em}
-  .stat-card .sd{width:9px;height:9px;border-radius:50%;background:var(--violet2);box-shadow:0 0 12px var(--violet)}
-  .stat-card.online .sd{background:var(--green);box-shadow:0 0 12px var(--green);animation:pulseDot 1.6s infinite}
-  .stat-card.offline .sd{background:var(--dim);box-shadow:none}
-  @keyframes pulseDot{0%,100%{opacity:1}50%{opacity:.35}}
-  .stat-card .sv{font-size:34px;font-weight:900;margin-top:12px;letter-spacing:.02em;
-    text-shadow:0 0 22px rgba(168,85,247,.4)}
-  .stat-card .sn{font-size:11px;color:var(--dim);margin-top:4px}
-  .users-meta{margin-top:16px;font-size:11.5px;color:var(--dim);line-height:1.8}
-  .users-bar{margin-top:16px;display:flex;gap:10px;flex-wrap:wrap;align-items:center}
-
-  /* §5 — phone polish: tighter chrome, horizontally-scrollable tabs (no wrap
-     pile-up), full-width controls, single-column stat grid. */
-  @media(max-width:560px){
-    .wrap{padding:13px}
-    .hd{padding:11px 13px;gap:9px}
-    .hd .brand{font-size:13.5px;letter-spacing:.06em}
-    .tabs{flex-wrap:nowrap;overflow-x:auto;padding:0 13px 11px;-webkit-overflow-scrolling:touch;
-      scrollbar-width:none}
-    .tabs::-webkit-scrollbar{display:none}
-    .tab{flex:0 0 auto;white-space:nowrap;padding:8px 13px;font-size:12.5px}
-    .sec{padding:16px;border-radius:15px;margin-bottom:14px}
-    .row{gap:10px}
-    .row>div{min-width:100%}
-    .btn{width:100%}
-    .users-bar .btn{flex:1 1 auto}
-    .media{flex-direction:column;align-items:stretch}
-    .media .thumb{width:100%}
-  }
+  .toast{position:fixed;bottom:22px;left:50%;transform:translateX(-50%) translateY(140%);
+    background:#141019;border:1px solid var(--line2);color:var(--txt);padding:12px 20px;border-radius:14px;
+    font-size:13px;z-index:50;transition:transform .3s;box-shadow:0 10px 40px rgba(0,0,0,.5)}
+  .toast.show{transform:translateX(-50%) translateY(0)}
+  .small{font-size:11px;color:var(--dim)}
+  .del-x{cursor:pointer;color:var(--red);font-weight:900;padding:4px 10px;border-radius:8px;
+    border:1px solid rgba(255,91,110,.4);background:rgba(255,91,110,.1)}
 </style>
 </head>
 <body>
 
-<!-- ================= LOGIN ================= -->
+<!-- ===================== LOGIN ===================== -->
 <div id="login">
   <div class="glass login-card">
     <div class="logo-dot"></div>
-    <div class="brand">PROFESSOR&nbsp;VPN</div>
-    <div class="sub">CONTROL&nbsp;PANEL</div>
-    <label for="u">نام کاربری</label>
-    <input id="u" type="text" autocomplete="username" />
-    <label for="p">رمز عبور</label>
-    <input id="p" type="password" autocomplete="current-password" />
-    <div style="height:16px"></div>
-    <button id="loginBtn" class="btn btn-primary btn-block">ورود</button>
-    <div id="loginErr" class="err"></div>
+    <div class="brand">PROFESSOR·VPN</div>
+    <div class="sub">CONTROL · 4.6</div>
+    <label>Username</label>
+    <input id="lg-user" type="text" autocomplete="username" />
+    <label>Password</label>
+    <input id="lg-pass" type="password" autocomplete="current-password" />
+    <div style="height:14px"></div>
+    <button class="btn btn-primary btn-block" id="lg-btn">ورود</button>
+    <div class="err" id="lg-err"></div>
   </div>
 </div>
 
-<!-- ================= APP ================= -->
+<!-- ===================== APP ===================== -->
 <div id="app" class="hidden">
   <header>
     <div class="hd">
-      <!-- Telegram quick-link, top-left, in brand PURPLE (never Telegram blue) -->
-      <a id="tg_icon" class="tg-icon" href="https://t.me/mx_pr" target="_blank" rel="noopener" title="تلگرام">
-        <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
-          <path fill="currentColor" d="M21.94 4.27a1.2 1.2 0 0 0-1.27-.2L3.3 11.05c-.93.37-.9 1.7.05 2.02l4.3 1.43 1.66 5.02c.2.6.97.78 1.43.35l2.4-2.22 4.27 3.15c.5.37 1.22.1 1.36-.5l3.2-14.7c.1-.46-.06-.9-.4-1.05ZM9.7 14.13l8.2-5.3-6.5 6.2c-.16.16-.27.37-.3.6l-.28 2.3-1.12-3.4Z"/>
-        </svg>
-      </a>
       <div class="mini"></div>
-      <div class="brand">PROFESSOR VPN · CONTROL</div>
-      <span class="badge" id="ver-badge">v0</span>
-      <button id="logoutBtn" class="btn btn-ghost btn-sm">خروج</button>
+      <div class="brand">PROFESSOR·VPN · Control</div>
+      <button class="btn btn-ghost btn-sm" id="btn-logout">خروج</button>
     </div>
     <div class="tabs">
-      <div class="tab active" data-tab="users">کاربران</div>
-      <div class="tab" data-tab="appb">بنر اپ</div>
-      <div class="tab" data-tab="webb">بنر سایت</div>
-      <div class="tab" data-tab="logos">لوگوها</div>
-      <div class="tab" data-tab="sponsor">اسپانسر</div>
-      <div class="tab" data-tab="contact">ارتباط</div>
-      <div class="tab" data-tab="publish">انتشار</div>
+      <div class="tab active" data-tab="tracking">📊 ترکینگ</div>
+      <div class="tab" data-tab="links">🔗 لینک‌ها</div>
+      <div class="tab" data-tab="home">🏠 صفحه اصلی</div>
+      <div class="tab" data-tab="donate">💎 دونیت</div>
+      <div class="tab" data-tab="preview">📱 پیش‌نمایش</div>
+      <div class="tab" data-tab="publish">🚀 انتشار</div>
     </div>
   </header>
 
   <div class="wrap">
-    <div class="grid">
-      <!-- ============ LEFT: editors ============ -->
-      <div>
-        <!-- ----- USERS (privacy-first aggregate stats) ----- -->
-        <div class="sec" id="tab-users">
-          <h3><span class="dot"></span> کاربران</h3>
-          <p class="hint">آمار کاملاً ناشناس و حریم‌خصوصی‌محور. هیچ IP، شناسه دستگاه، موقعیت مکانی، اطلاعات شخصی یا محتوای کانفیگ ذخیره یا نمایش داده نمی‌شود — فقط شمارش تجمیعی. هر نصب اپ یک رکورد ناشناس می‌سازد.</p>
-          <div class="stat-grid">
-            <div class="stat-card online">
-              <div class="sk"><span class="sd"></span> کاربران آنلاین</div>
-              <div class="sv" id="u_online">—</div>
-              <div class="sn">فعال در ۵ دقیقه اخیر</div>
-            </div>
-            <div class="stat-card offline">
-              <div class="sk"><span class="sd"></span> کاربران آفلاین</div>
-              <div class="sv" id="u_offline">—</div>
-              <div class="sn">نصب‌شده اما غیرفعال</div>
-            </div>
-            <div class="stat-card">
-              <div class="sk"><span class="sd"></span> همه کاربران</div>
-              <div class="sv" id="u_all">—</div>
-              <div class="sn">مجموع نصب‌های ناشناس</div>
-            </div>
-          </div>
-          <div class="users-bar">
-            <button class="btn btn-ghost btn-sm" id="u_refresh">↻ به‌روزرسانی آمار</button>
-            <span class="badge" id="u_updated">—</span>
-          </div>
-          <div class="users-meta">
-            • شناسه‌ی ناشناس فقط یک توکن تصادفی غیرقابل‌بازگشت است.<br>
-            • هیچ داده‌ی شخصی، IP یا موقعیت مکانی جمع‌آوری نمی‌شود.<br>
-            • شمارنده‌ها فقط اعداد تجمیعی هستند و قابل ردیابی به فرد نیستند.
-          </div>
+
+    <!-- ============ TRACKING ============ -->
+    <section id="tab-tracking">
+      <div class="card">
+        <h3>آمار کاربران</h3>
+        <p class="hint">آمار به‌صورت ناشناس و تجمیعی از سرویس شمارنده عمومی خوانده می‌شود (بدون هیچ اطلاعات شخصی).</p>
+        <div class="grid3">
+          <div class="stat"><div class="n" id="st-all">—</div><div class="l">کل نصب‌ها</div></div>
+          <div class="stat"><div class="n" id="st-online"><span class="dot g"></span>—</div><div class="l">آنلاین (۵ دقیقه اخیر)</div></div>
+          <div class="stat"><div class="n" id="st-offline"><span class="dot r"></span>—</div><div class="l">آفلاین</div></div>
         </div>
+        <div style="height:14px"></div>
+        <button class="btn btn-ghost btn-sm" id="btn-refresh-stats">🔄 بروزرسانی آمار</button>
+        <span class="small" id="stats-updated" style="margin-inline-start:10px"></span>
+      </div>
+    </section>
 
-        <!-- ----- APP BANNER ----- -->
-        <div class="sec hidden" id="tab-appb">
-          <h3><span class="dot"></span> بنر داخل اپ</h3>
-          <p class="hint">این بنر فقط داخل اپلیکیشن اندروید نمایش داده می‌شود و کاملاً جدا از بنر سایت است. متن، تصویر یا گیف، رنگ و رفتار کلیک را تنظیم کنید.</p>
-
-          <label class="switch"><input type="checkbox" id="ab_enabled" checked><span class="track"></span><span class="sl">نمایش بنر در اپ</span></label>
-
-          <label>عنوان بنر</label>
-          <input id="ab_title" type="text" />
-          <label>زیرعنوان بنر</label>
-          <input id="ab_subtitle" type="text" />
-
-          <label>تصویر / گیف بنر اپ</label>
-          <div class="media">
-            <div class="thumb"><img id="ab_thumb" class="hidden"><span class="ph" id="ab_ph">بدون مدیا</span></div>
-            <div class="ctl">
-              <input id="ab_image" type="text" placeholder="آدرس مستقیم تصویر/گیف یا آپلود کنید" />
-              <div class="btns">
-                <button class="btn btn-ghost btn-sm" id="ab_upload_btn">⬆ آپلود تصویر/گیف</button>
-                <button class="btn btn-danger btn-sm" id="ab_remove_btn">حذف مدیا</button>
-              </div>
-              <div class="upnote">PNG · JPG · WEBP · GIF — آپلود مستقیم به مخزن (cache-busted، نمایش زنده).</div>
-            </div>
-            <input id="ab_file" type="file" accept="image/png,image/jpeg,image/webp,image/gif" class="hidden">
-          </div>
-          <label class="switch" style="margin-top:12px"><input type="checkbox" id="ab_media_visible" checked><span class="track"></span><span class="sl">نمایش مدیا (در صورت خاموش بودن فقط متن نشان داده می‌شود)</span></label>
-
-          <div class="row" style="margin-top:6px">
-            <div><label>رنگ پس‌زمینه</label>
-              <div class="colorline"><input type="color" id="ab_bg_color"><input id="ab_bg_hex" type="text"></div></div>
-            <div><label>رنگ متن</label>
-              <div class="colorline"><input type="color" id="ab_text_color"><input id="ab_text_hex" type="text"></div></div>
-          </div>
-
-          <label>رفتار کلیک بنر اپ</label>
-          <select id="ab_action">
-            <option value="contact">باز کردن صفحه ارتباط</option>
-            <option value="url">باز کردن لینک</option>
-            <option value="none">بدون عملکرد</option>
-          </select>
-          <div id="ab_url_wrap" class="hidden"><label>لینک مقصد</label><input id="ab_action_url" type="text" placeholder="https://…"></div>
+    <!-- ============ LINKS ============ -->
+    <section id="tab-links" class="hidden">
+      <div class="card">
+        <h3>لینک دکمه بالای صفحه (نام فیلترشکن)</h3>
+        <p class="hint">دکمه‌ی تلگرام کنار نام «Professor VPN» در بالای صفحه اصلی. لینک تلگرام بزنید.</p>
+        <label>لینک تلگرام (In-App)</label>
+        <input id="ln-inapp" type="url" placeholder="https://t.me/YourChannel" />
+      </div>
+      <div class="card">
+        <h3>دکمه زیر دکمه اتصال (CTA)</h3>
+        <p class="hint">دکمه‌ای که زیر «Tap to connect» نمایش داده می‌شود. متن فارسی/انگلیسی و لینک قابل تغییر است.</p>
+        <label class="switch"><input type="checkbox" id="cta-enabled" /><span class="track"></span> فعال باشد</label>
+        <div class="row" style="margin-top:12px">
+          <div class="col"><label>متن فارسی</label><input id="cta-fa" placeholder="عضو کانال تلگرام شوید" /></div>
+          <div class="col"><label>متن انگلیسی</label><input id="cta-en" placeholder="Join our Telegram channel" /></div>
         </div>
+        <label>لینک دکمه</label>
+        <input id="cta-url" type="url" placeholder="https://t.me/YourChannel" />
+      </div>
+      <div class="card">
+        <h3>لینک صفحه تماس / تلگرام</h3>
+        <label>آیدی تلگرام (Copy)</label>
+        <input id="ct-id" placeholder="@YourId" />
+        <label>لینک تلگرام (Send)</label>
+        <input id="ct-url" type="url" placeholder="https://t.me/YourId" />
+      </div>
+    </section>
 
-        <!-- ----- WEBSITE BANNER ----- -->
-        <div class="sec hidden" id="tab-webb">
-          <h3><span class="dot"></span> بنر صفحه دانلود (سایت)</h3>
-          <p class="hint">این بنر فقط در صفحه دانلود سایت نمایش داده می‌شود و کاملاً مستقل از بنر اپ است (چیدمان و رفتار جدا).</p>
-
-          <label class="switch"><input type="checkbox" id="wb_enabled" checked><span class="track"></span><span class="sl">نمایش بنر در سایت</span></label>
-
-          <label>عنوان بنر سایت</label>
-          <input id="wb_title" type="text" />
-          <label>زیرعنوان بنر سایت</label>
-          <input id="wb_subtitle" type="text" />
-
-          <label>تصویر / گیف بنر سایت</label>
-          <div class="media">
-            <div class="thumb"><img id="wb_thumb" class="hidden"><span class="ph" id="wb_ph">بدون مدیا</span></div>
-            <div class="ctl">
-              <input id="wb_image" type="text" placeholder="آدرس مستقیم تصویر/گیف یا آپلود کنید" />
-              <div class="btns">
-                <button class="btn btn-ghost btn-sm" id="wb_upload_btn">⬆ آپلود تصویر/گیف</button>
-                <button class="btn btn-danger btn-sm" id="wb_remove_btn">حذف مدیا</button>
-              </div>
-              <div class="upnote">PNG · JPG · WEBP · GIF — مستقل از بنر اپ.</div>
-            </div>
-            <input id="wb_file" type="file" accept="image/png,image/jpeg,image/webp,image/gif" class="hidden">
-          </div>
-          <label class="switch" style="margin-top:12px"><input type="checkbox" id="wb_media_visible" checked><span class="track"></span><span class="sl">نمایش مدیا در سایت</span></label>
-
-          <label>رفتار کلیک بنر سایت</label>
-          <select id="wb_action">
-            <option value="contact">اسکرول به بخش ارتباط</option>
-            <option value="url">باز کردن لینک</option>
-            <option value="none">بدون عملکرد</option>
-          </select>
-          <div id="wb_url_wrap" class="hidden"><label>لینک مقصد</label><input id="wb_action_url" type="text" placeholder="https://…"></div>
+    <!-- ============ HOME (3 sections) ============ -->
+    <section id="tab-home" class="hidden">
+      <div class="card">
+        <h3>۱) لوگوی برنامه</h3>
+        <p class="hint">لینک لوگوی نمایشی کنار نام برنامه. خالی = استفاده از لوگوی پیش‌فرض.</p>
+        <label>Logo URL</label>
+        <input id="app-logo" type="url" placeholder="https://…/logo.png" />
+      </div>
+      <div class="card">
+        <h3>۲) بنر پایین صفحه خانه</h3>
+        <p class="hint">می‌توانید عکس آپلود کنید، یا بدون عکس فقط متن با رنگ دلخواه بنویسید. لینک پشت بنر هم قابل تنظیم است.</p>
+        <label class="switch"><input type="checkbox" id="bn-enabled" /><span class="track"></span> بنر فعال باشد</label>
+        <label style="margin-top:12px">آپلود عکس (Local) — تبدیل و انتخاب</label>
+        <input id="bn-file" type="file" accept="image/*" />
+        <label>یا لینک عکس مستقیم</label>
+        <input id="bn-image" type="url" placeholder="https://…/banner.png" />
+        <div class="row">
+          <div class="col"><label>متن بنر (اگر عکس نگذاشتید)</label><input id="bn-text" placeholder="متن دلخواه شما" /></div>
+          <div class="col" style="max-width:150px"><label>رنگ متن</label><input id="bn-color" type="color" value="#E6F2EC" style="height:46px;padding:4px" /></div>
         </div>
+        <label>لینک پشت بنر</label>
+        <input id="bn-url" type="url" placeholder="https://…" />
+      </div>
+      <div class="card">
+        <h3>۳) تنظیمات عمومی برنامه</h3>
+        <p class="hint">آخرین نسخه منتشرشده برنامه (برای اطلاع‌رسانی آپدیت).</p>
+        <label>آخرین نسخه APK</label>
+        <input id="hm-apk" placeholder="4.6" />
+      </div>
+    </section>
 
-        <!-- ----- LOGOS ----- -->
-        <div class="sec hidden" id="tab-logos">
-          <h3><span class="dot"></span> لوگوها</h3>
-          <p class="hint">لوگوی اپ و لوگوی سایت جداگانه کنترل می‌شوند و به‌صورت زنده به‌روزرسانی می‌شوند.</p>
-
-          <label>لوگوی اپ (داخل اپلیکیشن)</label>
-          <div class="media">
-            <div class="thumb"><img id="al_thumb" class="hidden"><span class="ph" id="al_ph">پیش‌فرض</span></div>
-            <div class="ctl">
-              <input id="app_logo" type="text" placeholder="آدرس لوگوی اپ یا آپلود" />
-              <div class="btns">
-                <button class="btn btn-ghost btn-sm" id="al_upload_btn">⬆ آپلود لوگو</button>
-                <button class="btn btn-danger btn-sm" id="al_remove_btn">حذف</button>
-              </div>
-            </div>
-            <input id="al_file" type="file" accept="image/png,image/jpeg,image/webp" class="hidden">
-          </div>
-
-          <label style="margin-top:14px">لوگوی سایت (صفحه دانلود)</label>
-          <div class="media">
-            <div class="thumb"><img id="wl_thumb" class="hidden"><span class="ph" id="wl_ph">پیش‌فرض</span></div>
-            <div class="ctl">
-              <input id="web_logo" type="text" placeholder="آدرس لوگوی سایت یا آپلود" />
-              <div class="btns">
-                <button class="btn btn-ghost btn-sm" id="wl_upload_btn">⬆ آپلود لوگو</button>
-                <button class="btn btn-danger btn-sm" id="wl_remove_btn">حذف</button>
-              </div>
-            </div>
-            <input id="wl_file" type="file" accept="image/png,image/jpeg,image/webp" class="hidden">
-          </div>
-        </div>
-
-        <!-- ----- SPONSOR (restricted config items) ----- -->
-        <div class="sec hidden" id="tab-sponsor">
-          <h3><span class="dot"></span> کانفیگ‌های اسپانسر</h3>
-          <p class="hint">هر آیتم یک کانفیگ <b>vless/vmess</b> اسپانسری است که در تب اسپانسر اپ نمایش داده می‌شود. کاربر فقط می‌تواند عنوان، مدیا و متن را ببیند و «پینگ» بگیرد — کپی، مشاهده‌ی جزئیات، دیدن IP یا افزودن به کانفیگ‌های من ممکن نیست. لینک خام فقط برای پینگ داخلی استفاده می‌شود و هرگز به کاربر نمایش داده نمی‌شود.</p>
-
-          <label class="switch"><input type="checkbox" id="sp_enabled" checked><span class="track"></span><span class="sl">فعال بودن بخش اسپانسر</span></label>
-
-          <div class="row" style="margin-top:6px">
-            <div><label>عنوان بخش (اختیاری)</label><input id="sp_heading" type="text" placeholder="اسپانسر"></div>
-            <div><label>یادداشت کوتاه (اختیاری)</label><input id="sp_note" type="text"></div>
-          </div>
-
-          <label style="margin-top:14px">کانفیگ‌های اسپانسر</label>
-          <div id="sp_items"></div>
-          <button class="btn btn-ghost btn-sm" id="sp_add_btn" style="margin-top:8px">＋ افزودن کانفیگ اسپانسر</button>
-        </div>
-
-        <!-- ----- CONTACT ----- -->
-        <div class="sec hidden" id="tab-contact">
-          <h3><span class="dot"></span> صفحه ارتباط</h3>
-          <p class="hint">متن صفحه ارتباط و آیدی تلگرام که در اپ و سایت نمایش داده می‌شود.</p>
-          <label>متن صفحه ارتباط</label>
-          <textarea id="c_text"></textarea>
-          <div class="row">
-            <div><label>آیدی تلگرام</label><input id="c_tg_id" type="text" placeholder="@username"></div>
-            <div><label>لینک تلگرام</label><input id="c_tg_url" type="text" placeholder="https://t.me/username"></div>
-          </div>
-          <label>In-App Telegram Link (آیکن تلگرام صفحه اصلی اپ)</label>
-          <p class="hint">لینک کانالی که با لمس آیکن تلگرام کنار عنوان «Professor VPN» در اپ باز می‌شود. اگر خالی باشد، از «لینک تلگرام» بالا استفاده می‌شود. باید با <code>https://t.me/</code> یا <code>https://telegram.me/</code> شروع شود.</p>
-          <input id="c_inapp_tg" type="text" placeholder="https://t.me/your_channel">
-          <label>برچسب دکمه‌ها (سفارشی)</label>
-          <div class="row">
-            <div><input id="c_btn_copy" type="text" placeholder="کپی آیدی"></div>
-            <div><input id="c_btn_send" type="text" placeholder="ارسال پیام"></div>
-          </div>
-        </div>
-
-        <!-- ----- PUBLISH ----- -->
-        <div class="sec hidden" id="tab-publish">
-          <h3><span class="dot"></span> انتشار زنده</h3>
-          <p class="hint">با فشردن «پیش‌نمایش و انتشار»، تغییرات روی اپ و سایت به‌صورت خودکار و بدون نیاز به ری‌استارت اعمال می‌شود (cache-busting + اعتبارسنجی نسخه).</p>
-          <label>توکن گیت‌هاب (فقط در مرورگر شما ذخیره می‌شود)</label>
-          <input id="gh_token" type="password" placeholder="ghp_…">
-          <div class="row" style="margin-top:6px">
-            <div><label>مخزن انتشار</label><input id="gh_repo" type="text" value="prfgame/prf-VPN"></div>
-            <div><label>شاخه</label><input id="gh_branch" type="text" value="main"></div>
-          </div>
-          <label>مسیر فایل تنظیمات</label>
-          <input id="gh_path" type="text" value="adminpanel/app_config.json">
-          <label style="margin-top:6px">نسخهٔ APK منتشرشده (latestApkVersion)</label>
-          <input id="latest_apk_version" type="text" value="3.8" placeholder="3.8">
-          <div id="last-updated" class="hint" style="margin-top:6px"></div>
-          <div class="json-box" style="margin-top:14px">
-            <label>خروجی JSON (پیش‌نمایش قبل از انتشار)</label>
-            <textarea id="json_out" readonly></textarea>
-          </div>
-          <div class="row" style="margin-top:14px">
-            <button id="reloadBtn" class="btn btn-ghost btn-block">بارگذاری مجدد از سرور</button>
-            <button id="applyBtn" class="btn btn-primary btn-block">پیش‌نمایش و انتشار</button>
-          </div>
-          <div id="status" class="status"></div>
+    <!-- ============ DONATE ============ -->
+    <section id="tab-donate" class="hidden">
+      <div class="card">
+        <h3>گزینه‌های حمایت (دونیت)</h3>
+        <p class="hint">گزینه‌های آماده را تیک بزنید و آدرس را وارد کنید، یا لینک/آدرس دلخواه اضافه کنید. در برنامه: سمت چپ لوگو، وسط آدرس، سمت راست دکمه کپی.</p>
+        <div class="row">
+          <div class="col"><label>عنوان بخش</label><input id="dn-heading" placeholder="از پروژه حمایت کنید" /></div>
+          <div class="col"><label>توضیح کوتاه</label><input id="dn-note" placeholder="حمایت شما سرورها را پایدار نگه می‌دارد" /></div>
         </div>
       </div>
 
-      <!-- ============ RIGHT: live preview ============ -->
-      <div class="preview-wrap">
-        <div class="sec">
-          <h3><span class="dot"></span> پیش‌نمایش زنده</h3>
-          <div class="pv-label">— نمای اپ —</div>
-          <div class="phone">
-            <div class="pbrand">PROFESSOR·VPN</div>
-            <div class="ptag">VLESS · VMESS · XRAY CORE</div>
-            <img id="pv_logo" class="plogo" alt="">
-            <div class="eye"></div>
-            <div class="pv-banner" id="pv_banner">
-              <img id="pv_img" class="hidden" alt="">
-              <div class="t" id="pv_title">محل تبلیغ شما</div>
-              <div class="s" id="pv_subtitle"></div>
-            </div>
-          </div>
-
-          <div class="pv-label" style="margin-top:18px">— نمای سایت —</div>
-          <div class="web-prev">
-            <img id="wpv_logo" class="wlogo" alt="">
-            <div class="wbrand">PROFESSOR VPN</div>
-            <div class="wb" id="wpv_banner">
-              <img id="wpv_img" class="hidden" alt="">
-              <div class="t" id="wpv_title">محل تبلیغ شما</div>
-              <div class="s" id="wpv_subtitle"></div>
-            </div>
-          </div>
+      <div class="card">
+        <h3>گزینه‌های آماده</h3>
+        <div id="preset-usdt" class="donate-row">
+          <label class="switch"><input type="checkbox" id="p-usdt-on" /><span class="track"></span></label>
+          <div class="ico" style="background:#26A17B">₮</div>
+          <div style="flex:1"><div class="chip">USDT (TRC20)</div>
+            <input id="p-usdt-addr" placeholder="آدرس ولت USDT TRC20" style="margin-top:8px" /></div>
+        </div>
+        <div id="preset-trx" class="donate-row">
+          <label class="switch"><input type="checkbox" id="p-trx-on" /><span class="track"></span></label>
+          <div class="ico" style="background:#EF0027">TRX</div>
+          <div style="flex:1"><div class="chip">TRON (TRC20)</div>
+            <input id="p-trx-addr" placeholder="آدرس ولت TRON" style="margin-top:8px" /></div>
+        </div>
+        <div id="preset-ton" class="donate-row">
+          <label class="switch"><input type="checkbox" id="p-ton-on" /><span class="track"></span></label>
+          <div class="ico" style="background:#0098EA">TON</div>
+          <div style="flex:1"><div class="chip">TON</div>
+            <input id="p-ton-addr" placeholder="آدرس ولت TON" style="margin-top:8px" /></div>
+        </div>
+        <div id="preset-btc" class="donate-row">
+          <label class="switch"><input type="checkbox" id="p-btc-on" /><span class="track"></span></label>
+          <div class="ico" style="background:#F7931A">₿</div>
+          <div style="flex:1"><div class="chip">Bitcoin</div>
+            <input id="p-btc-addr" placeholder="آدرس ولت Bitcoin" style="margin-top:8px" /></div>
         </div>
       </div>
-    </div>
+
+      <div class="card">
+        <h3>افزودن آدرس دلخواه</h3>
+        <p class="hint">اگر نمی‌خواهید از گزینه‌های آماده استفاده کنید، آدرس/شبکه دلخواه اضافه کنید.</p>
+        <div class="row">
+          <div class="col" style="max-width:180px"><label>نام / شبکه</label><input id="cust-coin" placeholder="مثلاً: BNB (BEP20)" /></div>
+          <div class="col"><label>آدرس</label><input id="cust-addr" placeholder="آدرس ولت" /></div>
+          <div class="col" style="max-width:120px;display:flex;align-items:flex-end">
+            <button class="btn btn-primary btn-sm btn-block" id="btn-add-custom">➕ افزودن</button>
+          </div>
+        </div>
+        <label>لینک لوگوی دلخواه (اختیاری)</label>
+        <input id="cust-logo" type="url" placeholder="https://…/coin.png" />
+        <div id="custom-list" style="margin-top:14px"></div>
+      </div>
+    </section>
+
+    <!-- ============ PREVIEW ============ -->
+    <section id="tab-preview" class="hidden">
+      <div class="card">
+        <h3>پیش‌نمایش صفحه اصلی</h3>
+        <p class="hint">نمای تقریبی از صفحه‌ی خانه برنامه با تنظیمات فعلی.</p>
+        <div class="phone">
+          <div class="p-brand">
+            <div class="p-tg">✈</div>
+            <div style="font-weight:900;letter-spacing:.06em;font-size:14px">PROFESSOR·VPN</div>
+          </div>
+          <div class="p-orb"></div>
+          <div class="p-connect">TAP TO CONNECT</div>
+          <div class="p-cta" id="pv-cta">✈ <span id="pv-cta-label">عضو کانال تلگرام شوید</span></div>
+          <div class="p-banner" id="pv-banner">محل بنر شما</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ PUBLISH ============ -->
+    <section id="tab-publish" class="hidden">
+      <div class="card">
+        <h3>انتشار تنظیمات</h3>
+        <p class="hint">توکن گیت‌هاب را وارد کنید (فقط در مرورگر شما ذخیره می‌شود). با زدن «انتشار»، فایل app_config.json در ریپازیتوری عمومی نوشته می‌شود و برنامه در اجرای بعدی آن را می‌خواند.</p>
+        <label>GitHub Token</label>
+        <input id="pb-token" type="password" placeholder="ghp_…" />
+        <div class="row" style="margin-top:6px">
+          <div class="col"><label>Repo (owner/name)</label><input id="pb-repo" value="aptixzero/PRF_VPN" /></div>
+          <div class="col"><label>مسیر فایل</label><input id="pb-path" value="adminpanel/app_config.json" /></div>
+        </div>
+        <div style="height:12px"></div>
+        <button class="btn btn-primary btn-block" id="btn-publish">🚀 انتشار تنظیمات</button>
+        <div class="err" id="pb-status" style="color:var(--dim)"></div>
+      </div>
+      <div class="card">
+        <h3>خروجی JSON فعلی</h3>
+        <textarea id="pb-json" style="min-height:220px;font-family:monospace;font-size:12px" readonly></textarea>
+      </div>
+    </section>
+
   </div>
 </div>
 
+<div class="toast" id="toast"></div>
 <script src="app.js"></script>
 </body>
 </html>
