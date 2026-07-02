@@ -45,8 +45,8 @@ before editing; prefer additive changes.
 | `service/TProxyService.kt` | `hev-socks5-tunnel` (tun2socks) JNI bridge: TUN ⇄ local SOCKS5. Native byte counters fallback. |
 | `config/XrayConfigBuilder.kt` | Builds the Xray JSON (inbounds: SOCKS5 10808 + API 10809; outbound: the selected server with Reality/XTLS/TLS + TLS-record fragmentation for anti-DPI). |
 | `config/ConfigParser.kt` | Parses `vless://` and `vmess://` (and only those) into `ServerConfig`. Handles emoji/symbols/mixed text. |
-| `config/Pinger.kt` | Real 2-stage ping confirmation through an actual Xray outbound. |
-| `config/ConfigSources.kt` / `ConfigFetcher.kt` | Fresh free-config sources (subscriptions updated within minutes) + resilient mirror fetching. |
+| `config/Pinger.kt` | Real proxied ping through an actual Xray outbound to CENSORED endpoints only (NEVER Google). v4.7: ONE confirmed real round-trip == reachable; probes are truly cancellable. |
+| `config/LiveSources.kt` / `SourceFetcher.kt` | 50 live free-config feeds (25 vless + 25 vmess) + resilient mirror fetching. |
 
 ### How a connection actually happens (the happy path)
 ```

@@ -148,41 +148,28 @@ class XrayManager(private val context: Context) {
     }
 
     /**
-     * v4.5 — LIVE-CORE confirmed health probe. This is the EXACT same
-     * "two-independent-censored-endpoint confirmation" rule the manual [Pinger]
-     * uses, but run through the ALREADY-RUNNING core instead of a throwaway one.
+     * v4.7 — LIVE-CORE health probe, aligned with the repaired [Pinger] rule:
+     * ONE real round-trip through the live core to a CENSORED endpoint (never
+     * Google) proves the tunnel genuinely carries blocked traffic.
      *
-     * Why it matters: the old health check / watchdog timed a SINGLE
-     * `generate_204` request, while the per-config ping required TWO confirmations
-     * across several censored endpoints. That mismatch is exactly what produced
-     * the "pings 100ms, 10s later it's dead / nothing loads" bug — a node that
-     * scraped a single lucky probe would show a ping yet fail to actually carry
-     * traffic. Now connect-time, the stats pump, and the watchdog all judge the
-     * tunnel with the SAME multi-endpoint confirmation the ping uses, so:
-     *   • a config that pings green REALLY connects (the live check agrees), and
-     *   • a config that has silently died is detected fast (it can no longer
-     *     confirm two censored endpoints), instead of lingering as "connected".
+     * Why one (not two): the v4.5/v4.6 "two independent censored endpoints"
+     * requirement was the direct cause of the "nothing connects" bug — on
+     * Iran's high-RTT, disrupted links a SECOND full round-trip very often
+     * cannot complete inside the health window even on a perfectly working
+     * node, so the connect path rejected every server and the watchdog tore
+     * live sessions down. One confirmed round-trip to a filtered endpoint is
+     * already an honest proof of bypass — and it exactly matches what the
+     * per-config ping now reports, so "pings → connects" stays true.
      *
-     * Returns the MEDIAN confirmed latency in ms, or -1 if it can't confirm.
+     * Returns the measured latency in ms, or -1 if no censored endpoint answers.
      */
     fun confirmedHealth(): Long {
         val c = controller ?: return -1
-        val good = ArrayList<Long>(HEALTH_PROBE_URLS.size)
-        for ((index, url) in HEALTH_PROBE_URLS.withIndex()) {
+        for (url in HEALTH_PROBE_URLS) {
             val d = try { c.measureDelay(url) } catch (_: Throwable) { -1L }
-            if (d in 1..8000) {
-                good.add(d)
-                if (good.size >= HEALTH_REQUIRED_CONFIRMATIONS) break
-            } else {
-                val remaining = HEALTH_PROBE_URLS.size - index - 1
-                // Give up early if the rest can't reach the required confirmations.
-                if (good.size + remaining < HEALTH_REQUIRED_CONFIRMATIONS) break
-            }
+            if (d in 1..8000) return d
         }
-        if (good.size < HEALTH_REQUIRED_CONFIRMATIONS) return -1
-        val sorted = good.sorted()
-        val mid = sorted.size / 2
-        return if (sorted.size % 2 == 1) sorted[mid] else (sorted[mid - 1] + sorted[mid]) / 2
+        return -1
     }
 
     private fun extractAsset(name: String) {
@@ -201,7 +188,7 @@ class XrayManager(private val context: Context) {
         private const val TAG = "XrayManager"
 
         /**
-         * v4.5 — censored-edge probe set the LIVE-core health check uses. These
+         * v4.7 — censored-edge probe set the LIVE-core health check uses. These
          * MUST mirror Pinger.PROBE_URLS so the connect/watchdog verdict matches
          * exactly what the per-config ping reported (the "ping == connects" rule).
          * NO Google here — Google is open on every ISP and proves nothing.
@@ -212,8 +199,6 @@ class XrayManager(private val context: Context) {
             "https://core.telegram.org/robots.txt",          // Telegram (blocked target)
             "https://i.instagram.com/favicon.ico"            // Instagram (blocked target)
         )
-        /** Two independent censored endpoints must answer before we call it healthy. */
-        private const val HEALTH_REQUIRED_CONFIRMATIONS = 2
 
         private val initLock = Any()
         @Volatile private var initialized = false

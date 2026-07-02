@@ -209,16 +209,14 @@ class FreeConfigsFragment : Fragment() {
         // Fully defensive: a store read / adapter swap during heavy Auto-Test
         // churn must never bubble an exception onto the main thread.
         //
-        // v4.5 — CRASH FIX. The old code reassigned `adapter.items = fresh` and
-        // THEN called applyStatuses(), which itself recomputed a DiffUtil pass off
-        // the freshly-swapped list. Doing the swap outside a notify cycle while the
-        // RecyclerView was mid-layout (very common during Auto-Test churn) left the
-        // adapter's item count out of sync with the RecyclerView → the
-        // "Inconsistency detected" crash on the 1→2→3 list transition. We now:
-        //   • bail if the RecyclerView is currently computing layout / animating
-        //     (re-post shortly after), and
-        //   • drive the whole list change through applyStatuses' guarded DiffUtil
-        //     by seeding the adapter with the fresh rows in the SAME guarded block.
+        // v4.7 — DEFINITIVE CRASH FIX for the "next 240 batch" transition. The
+        // v4.5 code still swapped `adapter.items` BEFORE running the DiffUtil
+        // pass, so the diff's "old list" was already the new list while the
+        // RecyclerView was displaying the previous one — row counts desynced →
+        // "Inconsistency detected. Invalid view holder adapter position". The
+        // adapter now exposes submitList(), which computes the diff against the
+        // list ACTUALLY displayed and swaps + dispatches atomically. We also
+        // still defer while the RecyclerView is mid-layout for extra safety.
         runCatching {
             if (!isAdded) return
             val rv = view?.findViewById<RecyclerView>(R.id.recycler)
@@ -231,10 +229,8 @@ class FreeConfigsFragment : Fragment() {
             val fresh = freeStore.get()
             seenKeys.clear()
             fresh.forEach { seenKeys.add(ConfigParser.dedupKey(it)) }
-            // Seed the adapter with the fresh rows, then let the guarded DiffUtil
-            // in applyStatuses reconcile + re-sort in one atomic, crash-proof pass.
-            adapter.items = ArrayList(fresh)
-            adapter.applyStatuses(PingService.statuses.value)
+            // Atomic, crash-proof swap + diff in ONE pass.
+            adapter.submitList(fresh, PingService.statuses.value)
             refreshEmpty()
             updateListHeader()
         }
@@ -273,9 +269,12 @@ class FreeConfigsFragment : Fragment() {
             if (!isActive || !isAdded) return@launch
 
             if (batch.configs.isNotEmpty()) {
-                adapter.items.addAll(batch.configs)
-                freeStore.replaceAll(adapter.items)
-                adapter.notifyDataSetChanged()
+                // v4.7 — go through the atomic submitList (diff computed against
+                // what the RecyclerView actually displays) instead of mutating
+                // adapter.items in place + notifyDataSetChanged.
+                val merged = ArrayList(adapter.items).apply { addAll(batch.configs) }
+                freeStore.replaceAll(merged)
+                adapter.submitList(merged, PingService.statuses.value)
                 refreshEmpty()
                 updateListHeader()
             }

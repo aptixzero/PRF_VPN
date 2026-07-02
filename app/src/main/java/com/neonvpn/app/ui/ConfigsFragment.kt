@@ -259,13 +259,16 @@ class ConfigsFragment : Fragment() {
     }
 
     private fun refresh() {
-        adapter.items = store.getServers()
-        adapter.selectedId = store.getSelectedId()
-        adapter.notifyDataSetChanged()
-        // Keep the fastest-first ordering after a list reload.
-        adapter.applyStatuses(PingService.statuses.value)
-        emptyView.visibility = if (adapter.items.isEmpty()) View.VISIBLE else View.GONE
-        updateActionLabels()
+        // v4.7 — atomic submitList (same crash fix as the Free tab): the diff is
+        // computed against the rows actually displayed, so a live Auto-Test flush
+        // into My Configs while this tab is visible can never desync the
+        // RecyclerView ("Inconsistency detected" crash).
+        runCatching {
+            adapter.selectedId = store.getSelectedId()
+            adapter.submitList(store.getServers(), PingService.statuses.value)
+            emptyView.visibility = if (adapter.items.isEmpty()) View.VISIBLE else View.GONE
+            updateActionLabels()
+        }
     }
 
     private fun toast(msg: String) {
@@ -310,13 +313,39 @@ class ServerAdapter(
      *     fallback so even a genuinely racy state can never crash the process.
      */
     fun applyStatuses(map: Map<String, PingStatus>) {
+        submitList(ArrayList(items), map)
+    }
+
+    /**
+     * v4.7 — SINGLE crash-proof entry point for EVERY list change (status
+     * updates AND full reloads from the store).
+     *
+     * The v4.5/v4.6 crash on the "next 240 batch" transition happened because
+     * reloadFromStore() swapped `adapter.items` to the fresh list FIRST and only
+     * THEN ran applyStatuses(): the DiffUtil "old list" was the fresh list, but
+     * the RecyclerView was still displaying the PREVIOUS list with a different
+     * row count → dispatched diff deltas didn't match the displayed state →
+     * "Inconsistency detected. Invalid view holder adapter position" crash.
+     *
+     * submitList() fixes it structurally: the diff's old list is ALWAYS the list
+     * the adapter is actually displaying right now, and `items` is only swapped
+     * together with dispatching that consistent diff. A full fallback to
+     * notifyDataSetChanged() guarantees no throwable can ever escape.
+     */
+    fun submitList(newItems: List<ServerConfig>, map: Map<String, PingStatus> = statuses) {
         val old = statuses
         statuses = map
-        if (selectMode) { runCatching { notifyDataSetChanged() }; return }
+        if (selectMode) {
+            runCatching {
+                items = newItems.toMutableList()
+                notifyDataSetChanged()
+            }
+            return
+        }
         runCatching {
-            // Immutable snapshot of the current rows for a consistent diff.
+            // Old list == what the RecyclerView is displaying RIGHT NOW.
             val oldItems: List<ServerConfig> = ArrayList(items)
-            val sorted = oldItems.sortedBy { PingService.sortKey(map[it.id] ?: PingStatus.Idle) }
+            val sorted = newItems.sortedBy { PingService.sortKey(map[it.id] ?: PingStatus.Idle) }
             val diff = androidx.recyclerview.widget.DiffUtil.calculateDiff(
                 object : androidx.recyclerview.widget.DiffUtil.Callback() {
                     override fun getOldListSize() = oldItems.size
@@ -334,7 +363,7 @@ class ServerAdapter(
         }.onFailure {
             // Last-ditch: drop animations, just resync the whole list. Never throw.
             runCatching {
-                items = items.sortedBy { PingService.sortKey(map[it.id] ?: PingStatus.Idle) }
+                items = newItems.sortedBy { PingService.sortKey(map[it.id] ?: PingStatus.Idle) }
                     .toMutableList()
                 notifyDataSetChanged()
             }

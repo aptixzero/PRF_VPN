@@ -47,6 +47,20 @@ class CrashHandler private constructor(
             // never let the crash handler itself crash
         }
 
+        // v4.7 — OOM first-aid. The "crash when the next 240-config batch is
+        // appended" bug ultimately surfaced as OutOfMemoryError on low-RAM
+        // phones. When ANY thread hits OOM we immediately shed the biggest
+        // shedable loads (stop the Auto-Test engine, drop cached ping states,
+        // force a GC) so the process has headroom to survive instead of dying.
+        if (isOom(e)) {
+            try {
+                Log.w(TAG, "OutOfMemory detected — shedding load (stop AutoTest, prune caches)")
+                runCatching { com.neonvpn.app.config.AutoTestEngine.stop() }
+                runCatching { com.neonvpn.app.config.PingService.prune(emptySet()) }
+                runCatching { System.gc() }
+            } catch (_: Throwable) {}
+        }
+
         // Threads we know how to survive: keep the process alive so the user's
         // app/UI doesn't die from a background connection / test hiccup. v4.2
         // widens this net so EVERY background worker (coroutine dispatchers,
@@ -167,6 +181,18 @@ class CrashHandler private constructor(
         s = IPV6_RX.replace(s, "[redacted-ip6]")
         s = HOSTPORT_RX.replace(s, "[redacted-host]")
         return s
+    }
+
+    /** True if [e] is an OutOfMemoryError anywhere in its cause chain. */
+    private fun isOom(e: Throwable): Boolean {
+        var cur: Throwable? = e
+        var hops = 0
+        while (cur != null && hops < 8) {
+            if (cur is OutOfMemoryError) return true
+            cur = cur.cause
+            hops++
+        }
+        return false
     }
 
     /** True only for the app's main/UI (Looper) thread. */

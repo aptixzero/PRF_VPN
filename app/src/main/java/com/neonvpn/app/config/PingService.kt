@@ -46,14 +46,15 @@ import kotlinx.coroutines.withTimeoutOrNull
 object PingService {
 
     /**
-     * v4.2 — ADAPTIVE concurrency so PING ALL stays fast on strong phones yet
-     * never floods a weak / low-core device with thousands of simultaneous
-     * sockets (a crash source on cheap hardware). Scaled from CPU cores:
-     * 2 cores → 6, 4 cores → 10, 8+ cores → 16.
+     * v4.7 — ADAPTIVE concurrency, LOWERED. Every probe spins up a throwaway
+     * native Xray core (tens of MB each); the old ceiling of 16 simultaneous
+     * cores exhausted native memory on 1–2 GB devices and was a major crash
+     * source during Auto Test / PING ALL on big lists. Scaled from CPU cores:
+     * 2 cores → 4, 4 cores → 6, 8+ cores → 8.
      */
     val MAX_CONCURRENCY: Int by lazy {
         val cores = Runtime.getRuntime().availableProcessors().coerceAtLeast(1)
-        (cores * 2).coerceIn(6, 16)
+        (cores + 2).coerceIn(4, 8)
     }
     const val PRIMARY_TIMEOUT_MS = 2_500L
     const val RETRY_TIMEOUT_MS = 1_500L
@@ -186,6 +187,22 @@ object PingService {
         PingStore(ctx, bucket).clear()
     }
 
+    /**
+     * v4.7 — BOUND the in-memory status map. The Auto-Test engine churns
+     * hundreds of configs per cycle; without pruning, the statuses map (and the
+     * persisted PingStore mirror) grew without limit across cycles — a slow
+     * memory leak that ended in the crash users saw exactly when the NEXT
+     * 240-config batch was being appended. Callers pass the ids that are still
+     * alive (current free list + My Configs); everything else is dropped.
+     */
+    @Synchronized
+    fun prune(keepIds: Set<String>) {
+        val cur = _statuses.value
+        if (cur.size <= keepIds.size) return
+        val pruned = cur.filterKeys { it in keepIds }
+        if (pruned.size != cur.size) _statuses.value = pruned
+    }
+
     // ---- internals -------------------------------------------------------
 
     /**
@@ -219,6 +236,13 @@ object PingService {
         setStatus(id, next)
     }
 
+    /**
+     * v4.7 — @Synchronized: many Auto-Test / PING-ALL coroutines push statuses
+     * concurrently; the old unguarded read-modify-write lost updates under
+     * contention (rows stuck on "testing…" forever). A plain monitor makes
+     * every write atomic without changing the flow semantics.
+     */
+    @Synchronized
     private fun setStatus(id: String, status: PingStatus) {
         _statuses.value = _statuses.value.toMutableMap().apply { put(id, status) }
     }

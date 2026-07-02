@@ -28,8 +28,8 @@ selected server. Only **VLESS** and **VMESS** configs are supported.
 
 The latest signed universal APK is published on the
 [Releases](https://github.com/aptixzero/PRF_VPN/releases/latest) page and mirrored in
-[`build/`](./build). The current artifact is `ProfessorVPN-v4.5-universal.apk`.
-Free configs are fetched from <https://github.com/aptixzero/con_new>.
+[`build/`](./build). The current artifact is `ProfessorVPN-v4.7-universal.apk`.
+Free configs are fetched live from the 50 public feeds in `LiveSources.kt`.
 
 ## Build
 

@@ -74,23 +74,28 @@ object AutoTestEngine {
     const val BATCH = FreeConfigSource.BATCH_PER_PRESS   // 240
 
     /**
-     * v4.2 — ADAPTIVE concurrency. On a strong phone we run more probes in
-     * parallel (fast Auto Test); on a weak / low-core device we throttle right
-     * down so the test never overwhelms RAM/CPU and crashes. Derived once from
-     * the number of CPU cores: 2 cores → 4, 4 cores → 6, 8+ cores → 10.
+     * v4.7 — ADAPTIVE concurrency, LOWERED. Every probe spins a throwaway
+     * native Xray core; running up to 10 at once exhausted native memory on
+     * low-RAM phones and crashed the engine right at the list-2 / list-3
+     * transition (the reported bug). 2 cores → 3, 4 cores → 5, 8+ cores → 6.
      */
     private val MAX_CONCURRENCY: Int by lazy {
         val cores = Runtime.getRuntime().availableProcessors().coerceAtLeast(1)
-        (cores + 2).coerceIn(4, 10)
+        (cores + 1).coerceIn(3, 6)
     }
+
     /**
-     * v4.4 — a node is "working" if its confirmed latency is at or below this.
-     * Matches Pinger's own MAX_VALID_MS so Auto Test accepts EXACTLY what a
-     * manual ping accepts. The whole point: Auto Test must behave IDENTICALLY to
-     * a manual ping — same engine, same censored-endpoint confirmation, same
-     * threshold, same accept/reject decision. Since Pinger now requires TWO
-     * censored-endpoint confirmations, anything it reports reachable is a node
-     * that genuinely bypasses censorship, so Auto Test only ever saves real ones.
+     * v4.7 — hard cap for the in-memory dedup set. It is re-seeded from the
+     * bounded [SeenConfigStore] when it overflows, so a multi-hour Auto Test
+     * session can no longer grow it without limit (another slow leak that
+     * contributed to the next-batch crash).
+     */
+    private const val MAX_SEEN_KEYS = 12_000
+    /**
+     * A node is "working" if its measured latency is at or below this. Matches
+     * Pinger's own MAX_VALID_MS so Auto Test accepts EXACTLY what a manual ping
+     * accepts — same engine, same censored-endpoint probe (never Google), same
+     * threshold, same accept/reject decision.
      */
     private const val WORKING_MAX_MS = 8_000L
 
@@ -176,6 +181,16 @@ object AutoTestEngine {
 
             while (isActive) {
                 cycle++
+                // v4.7 — keep the dedup memory bounded across a long session.
+                if (seenKeys.size > MAX_SEEN_KEYS) {
+                    runCatching {
+                        seenKeys.clear()
+                        seenKeys.addAll(SeenConfigStore.load(appCtx))
+                        freeStore.get().forEach { seenKeys.add(ConfigParser.dedupKey(it)) }
+                        myStore.getServers().forEach { seenKeys.add(ConfigParser.dedupKey(it)) }
+                    }
+                }
+
                 // ---- 1) SEARCH: pull the next batch + append to the free list ----
                 updateProgress {
                     it.copy(running = true, cycle = cycle, phase = "Searching…",
@@ -200,13 +215,27 @@ object AutoTestEngine {
                     continue
                 }
 
-                // Append to the free list (visible in the Free tab) — guarded.
+                // v4.7 — REPLACE (not append). Appending 240 fresh configs on top
+                // of the previous batch every cycle made the free list — and the
+                // RecyclerView diff the Free tab recomputes on every status tick —
+                // grow without bound; the list-2→3 transition then OOM-crashed on
+                // weaker devices (the exact reported crash). The engine wipes the
+                // batch at the end of the cycle anyway (working ones are already
+                // saved to My Configs), so carrying dead rows forward has zero
+                // value and a real cost. Each cycle the tab now shows exactly the
+                // batch currently under test.
                 runCatching {
                     storeMutex.withLock {
-                        val freeList = freeStore.get()
-                        freeList.addAll(fresh)
-                        freeStore.replaceAll(freeList)
+                        freeStore.replaceAll(fresh)
                     }
+                }
+                // Also drop ping states of rows that no longer exist so the shared
+                // statuses map cannot grow forever across cycles.
+                runCatching {
+                    val keep = HashSet<String>(fresh.size + 64)
+                    fresh.forEach { keep.add(it.id) }
+                    myStore.getServers().forEach { keep.add(it.id) }
+                    PingService.prune(keep)
                 }
 
                 // ---- 2) TEST: ping everything in this fresh batch ----
@@ -277,21 +306,15 @@ object AutoTestEngine {
                 // Flush any remaining working configs from this batch.
                 flushWorking(myStore, workingThisBatch)
 
-                // ---- 4) CLEAN UP: drop the non-working configs from the free list ----
+                // ---- 4) CLEAN UP: keep only the reachable rows in the free list ----
+                // (the working ones are already copied to My Configs; the dead ones
+                // are dropped so the next cycle starts from a small, clean list).
                 runCatching {
                     storeMutex.withLock {
-                        // We wipe the whole free batch each cycle (working ones already
-                        // copied to My Configs) so the list keeps cycling fresh configs.
-                        val current = freeStore.get()
-                        if (current.size >= BATCH) {
-                            freeStore.clear()
-                        } else {
-                            // keep only the reachable ones (sorted nicely by the tab).
-                            val reachable = current.filter {
-                                PingService.statusOf(it.id) is PingService.PingStatus.Reachable
-                            }
-                            freeStore.replaceAll(reachable.toMutableList())
+                        val reachable = freeStore.get().filter {
+                            PingService.statusOf(it.id) is PingService.PingStatus.Reachable
                         }
+                        freeStore.replaceAll(reachable)
                     }
                 }
 

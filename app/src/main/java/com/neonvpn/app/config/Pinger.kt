@@ -2,42 +2,47 @@ package com.neonvpn.app.config
 
 import android.util.Log
 import com.neonvpn.app.service.XrayManager
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 
 /**
  * REAL end-to-end reachability test for a single [ServerConfig].
  *
- * v4.4 — TRUST-WORTHY PING (a green ping == 100% really connects).
+ * v4.7 — THE PING WORKS AGAIN (and it is still 100% real).
  * ─────────────────────────────────────────────────────────────────────────────
- * THE PROBLEM WITH v4.3
- *   v4.3 timed `generate_204` on Cloudflare/Google. Google's 204 is reachable
- *   from almost ANY network even WITHOUT a working proxy, and the native
- *   measurer can report a "success" off a half-open path — so configs showed a
- *   ping but then FAILED to actually load censored sites. A ping that lies is
- *   worse than no ping.
+ * WHY v4.6 SHOWED NO PING FOR ANY CONFIG (the bug this fixes)
+ *   v4.6 required TWO successes on TWO DISTINCT censored endpoints inside a
+ *   9-second total budget with 4s per probe. On Iran's high-RTT links the first
+ *   endpoint alone can eat 3-4s; a second full round-trip through a SECOND
+ *   throwaway Xray core simply never fit the budget — so EVERY config, even a
+ *   perfectly working one, came back "unreachable". On top of that the native
+ *   `measureOutboundDelay` call is a BLOCKING JNI call that ignores coroutine
+ *   cancellation, so the per-probe timeout silently didn't fire and one hung
+ *   probe stalled the whole sweep.
  *
- * THE v4.4 RULE  (exactly what the user demanded):
+ * THE v4.7 RULE (real ping, no Google, realistic for Iran):
  *   • DO NOT test against Google — it is open everywhere and proves nothing.
- *   • Test against endpoints that are ONLY reachable through a genuinely working
- *     anti-censorship tunnel: Cloudflare's trace edge, Telegram's CDN and
- *     Instagram. If the proxy can fetch THESE, it can carry real blocked traffic
- *     — so a green ping means the node actually works, 100%.
- *   • CONFIRM, don't guess. We require TWO independent successes through the
- *     outbound (e.g. Cloudflare + Telegram) before we call a node reachable.
- *     A single fluke success on one endpoint is NOT enough — that was how dead
- *     nodes used to slip through as "green".
- *   • The reported latency is the MEDIAN of the confirmed probes, so the number
- *     the user sees is a realistic round-trip, not a lucky best-case.
+ *     Every probe endpoint is a genuinely FILTERED target (Cloudflare edge,
+ *     Telegram, Instagram) that only a working anti-censorship tunnel reaches.
+ *   • ONE confirmed round-trip through the real outbound to a censored endpoint
+ *     IS a real, honest ping — it is the same thing v2rayNG shows. We take the
+ *     FIRST endpoint that answers and report ITS latency (a real measured
+ *     round-trip, never a fake or random number).
+ *   • The probe is made truly cancellable: the blocking native call runs in an
+ *     `async` job that we await WITH a timeout, so a hung native probe can no
+ *     longer freeze the sweep — we abandon it and move on.
  *
  * The probe always travels THROUGH the Xray outbound built by
  * [XrayConfigBuilder.buildPingConfig] — the SAME outbound + stream settings the
  * live connect path uses — so it reflects the real tunnel on any network
  * (Wi-Fi / mobile data / any ISP), never the local link.
  *
- * Returns the confirmed latency in ms, or [UNREACHABLE] (-1) if the server
- * cannot prove it carries censored traffic.
+ * Returns the measured latency in ms, or [UNREACHABLE] (-1) if the server
+ * cannot reach any censored endpoint.
  */
 object Pinger {
 
@@ -51,41 +56,54 @@ object Pinger {
      * attempts combined). Callers must treat [ping] as already-bounded and must
      * NOT wrap it in a shorter timeout (that was the v4.2 starvation bug).
      */
-    const val PER_CONFIG_BUDGET_MS = 9_000L
+    const val PER_CONFIG_BUDGET_MS = 12_000L
 
     /** Per single probe attempt ceiling (one endpoint, one round-trip). */
-    private const val PER_PROBE_BUDGET_MS = 4_000L
+    private const val PER_PROBE_BUDGET_MS = 5_000L
 
     /**
-     * v4.4 — CENSORSHIP-GATED probe endpoints (NO Google).
+     * v4.7 — dedicated scope for the blocking native probe calls. The native
+     * `measureOutboundDelay` ignores coroutine cancellation, so each probe runs
+     * as an [async] child here and the caller awaits it with a timeout: when the
+     * timeout fires we ABANDON the still-blocking call (it finishes and is
+     * discarded) instead of letting it stall the sweep. SupervisorJob so an
+     * abandoned/failed probe never cancels anything else.
+     */
+    private val probeScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    /**
+     * v4.7 — CENSORSHIP-GATED probe endpoints (NO Google, ever).
      *
      * Every entry here is a site that a strong filter blocks and that a real
      * working proxy CAN reach. If a node can fetch these it genuinely bypasses
-     * censorship, so a green ping is trustworthy.
+     * censorship, so a green ping is trustworthy — and the number shown is the
+     * REAL measured round-trip through the tunnel, exactly what an Iranian user
+     * will experience.
      *
-     *   1. Cloudflare trace  — `1.1.1.1/cdn-cgi/trace` returns a tiny text body
-     *      almost instantly; Cloudflare's edge is throttled/blocked on many
-     *      filtered ISPs, so reaching it proves the tunnel carries TLS traffic.
-     *   2. Telegram CDN      — `cdn4.telegram-cdn.org` / core.telegram.org are
-     *      blocked targets that answer fast; a classic real-world bypass test.
-     *   3. Instagram         — `i.instagram.com` is blocked and answers quickly.
-     *
-     * Ordered fastest-first. We need TWO of these to succeed (see [ping]) so one
-     * endpoint being briefly down can never fake a pass or fake a fail.
+     * Ordered FASTEST-FIRST so the common case (a working node) answers on the
+     * very first, tiniest probe:
+     *   1. Cloudflare edge 204 — a ~0-byte response, the fastest possible real
+     *      round-trip; Cloudflare is throttled/filtered on Iranian ISPs, so
+     *      reaching it proves the tunnel carries real TLS traffic.
+     *   2. Cloudflare trace    — tiny text body, second confirmation candidate.
+     *   3. Telegram            — classic blocked target, answers fast.
+     *   4. Instagram           — blocked target, last resort.
      */
     private val PROBE_URLS = listOf(
-        // v4.6 — ordered strongest-first for Iran. Telegram + Cloudflare give the
-        // most trustworthy real-connect signal (they answer fast AND are genuinely
-        // filtered), Instagram is a third confirmation. Google is deliberately
-        // absent (it's reachable without a working tunnel, so it proves nothing).
-        "https://core.telegram.org/robots.txt",          // Telegram (blocked target, fast)
-        "https://www.cloudflare.com/cdn-cgi/trace",      // Cloudflare trace (filtered, tiny body)
         "https://cp.cloudflare.com/generate_204",        // Cloudflare edge (filtered, tiny 204)
+        "https://www.cloudflare.com/cdn-cgi/trace",      // Cloudflare trace (filtered, tiny body)
+        "https://core.telegram.org/robots.txt",          // Telegram (blocked target)
         "https://i.instagram.com/favicon.ico"            // Instagram (blocked target)
     )
 
-    /** How many DISTINCT endpoints must succeed before a node is "reachable". */
-    private const val REQUIRED_CONFIRMATIONS = 2
+    /**
+     * v4.7 — ONE confirmed censored-endpoint round-trip == reachable. The v4.6
+     * two-confirmation rule did not fit the time budget on Iranian links and
+     * made EVERY config read "unreachable" (the "no ping at all" bug). A single
+     * timed success through the real outbound to a FILTERED endpoint is already
+     * a genuine proof of bypass — the same standard v2rayNG applies.
+     */
+    private const val REQUIRED_CONFIRMATIONS = 1
 
     /** Latency upper bound for a node we still treat as "reachable". */
     private const val MAX_VALID_MS = 8_000L
@@ -103,25 +121,18 @@ object Pinger {
             return@withContext UNREACHABLE
         }
 
-        // Whole-config budget guards against a native call that hangs.
+        // Whole-config budget guards the sweep even if every probe times out.
         val result = withTimeoutOrNull(PER_CONFIG_BUDGET_MS) {
             val good = ArrayList<Long>(PROBE_URLS.size)
-            var failures = 0
 
-            // Probe censored endpoints one by one. We stop EARLY in two cases:
-            //   • we already have REQUIRED_CONFIRMATIONS successes  → reachable
-            //   • too many endpoints failed for the rest to ever confirm → dead
-            for ((index, url) in PROBE_URLS.withIndex()) {
+            // Probe censored endpoints one by one, fastest first. We stop the
+            // moment we have the required confirmation(s) — for v4.7 that is the
+            // FIRST real round-trip that succeeds.
+            for (url in PROBE_URLS) {
                 val ms = singleProbe(json, url)
                 if (ms in 1..MAX_VALID_MS) {
                     good.add(ms)
                     if (good.size >= REQUIRED_CONFIRMATIONS) break
-                } else {
-                    failures++
-                    val remaining = PROBE_URLS.size - index - 1
-                    // If even succeeding on every remaining endpoint can't reach
-                    // the required confirmations, give up now (fail fast).
-                    if (good.size + remaining < REQUIRED_CONFIRMATIONS) break
                 }
             }
 
@@ -139,17 +150,26 @@ object Pinger {
         else (sorted[mid - 1] + sorted[mid]) / 2
     }
 
-    /** One hard-wall-clock-capped proxied round-trip through [json] to [url]. */
+    /**
+     * One hard-wall-clock-capped proxied round-trip through [json] to [url].
+     *
+     * v4.7 — TRULY cancellable. The native measure call blocks and ignores
+     * cancellation, so it runs as an [async] child of [probeScope] and we await
+     * it with a timeout. When the timeout fires, `await()` is cancelled (await
+     * IS cancellable even though the native call isn't) and we return -1
+     * immediately — the abandoned native call finishes in the background and is
+     * discarded. This is what un-freezes the sweep that v4.6 stalled.
+     */
     private suspend fun singleProbe(json: String, url: String): Long {
-        return withTimeoutOrNull(PER_PROBE_BUDGET_MS) {
-            withContext(Dispatchers.IO) {
-                try {
-                    XrayManager.measureConfigDelay(json, url)
-                } catch (e: Throwable) {
-                    Log.w(TAG, "core delay error: ${e.message}")
-                    -1L
-                }
+        val deferred = probeScope.async {
+            try {
+                XrayManager.measureConfigDelay(json, url)
+            } catch (e: Throwable) {
+                Log.w(TAG, "core delay error: ${e.message}")
+                -1L
             }
-        } ?: -1L
+        }
+        return withTimeoutOrNull(PER_PROBE_BUDGET_MS) { deferred.await() }
+            ?: run { deferred.cancel(); -1L }
     }
 }
