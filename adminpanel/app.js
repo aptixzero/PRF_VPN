@@ -75,11 +75,13 @@
   /* ------------------------------------------------------------ the model -- */
   // Custom donate rows added by the operator (preset rows are handled inline).
   var customDonate = [];
+  // v6.3 — download-link rows added by the operator (unlimited).
+  var downloadItems = [];
 
   function defaultModel() {
     return {
       version: 1,
-      latestApkVersion: "4.6",
+      latestApkVersion: "6.3",
       appLogo: { url: "" },
       inAppTelegramUrl: "",
       contact: {
@@ -94,8 +96,19 @@
       },
       homeCta: { enabled: true, labelFa: "", labelEn: "", url: "" },
       homeBanner: { enabled: true, imageUrl: "", text: "", textColor: "#E6F2EC", url: "" },
-      donate: { enabled: true, heading: "", note: "", items: [] }
+      donate: { enabled: true, heading: "", note: "", items: [] },
+      // v6.3 — drawer → "Download Links" page
+      downloadLinks: { enabled: true, heading: "", note: "", items: [] },
+      // v6.3 — in-app announcement (title is fixed in the app)
+      notice: { enabled: false, title: "اعلان Professor Vpn", text: "", id: "", color: "#8A3FFC" }
     };
+  }
+
+  // Stable short id for a notice text so the app can remember "already dismissed".
+  function noticeIdOf(text) {
+    var h = 5381, i;
+    for (i = 0; i < text.length; i++) { h = ((h << 5) + h + text.charCodeAt(i)) >>> 0; }
+    return "n" + h.toString(36);
   }
 
   /* -------------------------------------------------------- form <-> model - */
@@ -121,7 +134,7 @@
     setVal("bn-text", bn.text || "");
     if (bn.textColor) setVal("bn-color", bn.textColor);
     setVal("bn-url", bn.url || "");
-    setVal("hm-apk", cfg.latestApkVersion || "4.6");
+    setVal("hm-apk", cfg.latestApkVersion || "6.3");
     // donate tab
     var dn = cfg.donate || {};
     setVal("dn-heading", dn.heading || "");
@@ -139,6 +152,27 @@
       }
     });
     renderCustom();
+
+    // downloads tab (v6.3)
+    var dl = cfg.downloadLinks || cfg.downloads || {};
+    setChk("dl-enabled", dl.enabled !== false);
+    setVal("dl-heading", dl.heading || "");
+    setVal("dl-note", dl.note || "");
+    downloadItems = [];
+    (dl.items || []).forEach(function (x) {
+      if (!x) return;
+      var url = (x.url || x.link || "").trim();
+      if (!url) return;
+      downloadItems.push({ title: (x.title || x.name || "").trim(), url: url, note: (x.note || "").trim() });
+    });
+    renderDownloads();
+
+    // notice tab (v6.3)
+    var nt = cfg.notice || cfg.notification || cfg.notifications || {};
+    setChk("nt-enabled", !!nt.enabled);
+    setVal("nt-text", nt.text || nt.message || "");
+    if (nt.color) setVal("nt-color", nt.color);
+    refreshNoticePreview();
   }
 
   // Read the form fields into a fresh config object matching RemoteConfig.kt.
@@ -147,7 +181,7 @@
     m.version = (prevVersion || 0) + 1;
     m.ts = Date.now();
     m.lastUpdatedAt = Date.now();
-    m.latestApkVersion = trimv("hm-apk") || "4.6";
+    m.latestApkVersion = trimv("hm-apk") || "6.3";
 
     var inapp = trimv("ln-inapp");
     m.inAppTelegramUrl = inapp;
@@ -208,7 +242,87 @@
       note: trimv("dn-note"),
       items: items
     };
+
+    // v6.3 — download links
+    var dls = [];
+    downloadItems.forEach(function (d, i) {
+      var url = (d.url || "").trim();
+      if (!url) return;
+      dls.push({
+        id: "dl_" + i,
+        title: (d.title || "").trim() || ("لینک " + (i + 1)),
+        url: url,
+        note: (d.note || "").trim()
+      });
+    });
+    m.downloadLinks = {
+      enabled: checked("dl-enabled"),
+      heading: trimv("dl-heading"),
+      note: trimv("dl-note"),
+      items: dls
+    };
+    // legacy alias so any older parser still finds it
+    m.downloads = JSON.parse(JSON.stringify(m.downloadLinks));
+
+    // v6.3 — notice
+    var ntText = (val("nt-text") || "").trim();
+    m.notice = {
+      enabled: checked("nt-enabled") && !!ntText,
+      title: "اعلان Professor Vpn",
+      text: ntText,
+      id: ntText ? noticeIdOf(ntText) : "",
+      color: trimv("nt-color") || "#8A3FFC"
+    };
+    m.notification = JSON.parse(JSON.stringify(m.notice));
+
     return m;
+  }
+
+  /* --------------------------------------------------- download links UI --- */
+  function renderDownloads() {
+    var box = $("dl-list");
+    if (!box) return;
+    if (!downloadItems.length) {
+      box.innerHTML = "<div class='small'>هنوز لینکی اضافه نشده.</div>";
+      return;
+    }
+    box.innerHTML = downloadItems.map(function (d, i) {
+      return "<div class='donate-row'>" +
+        "<div class='ico' style='background:#6d28d9'>⬇</div>" +
+        "<div style='flex:1;min-width:0'>" +
+          "<div class='chip'>" + esc(d.title || ("لینک " + (i + 1))) + "</div>" +
+          "<div class='addr' style='margin-top:6px'>" + esc(d.url) + "</div>" +
+          (d.note ? "<div class='small' style='margin-top:4px'>" + esc(d.note) + "</div>" : "") +
+        "</div>" +
+        "<span class='del-x' data-up='" + i + "' style='color:var(--violet2)'>↑</span>" +
+        "<span class='del-x' data-dldel='" + i + "'>حذف</span>" +
+      "</div>";
+    }).join("");
+    Array.prototype.forEach.call(box.querySelectorAll("[data-dldel]"), function (el) {
+      el.addEventListener("click", function () {
+        downloadItems.splice(parseInt(el.getAttribute("data-dldel"), 10), 1);
+        renderDownloads();
+      });
+    });
+    Array.prototype.forEach.call(box.querySelectorAll("[data-up]"), function (el) {
+      el.addEventListener("click", function () {
+        var i = parseInt(el.getAttribute("data-up"), 10);
+        if (i <= 0) return;
+        var tmp = downloadItems[i - 1];
+        downloadItems[i - 1] = downloadItems[i];
+        downloadItems[i] = tmp;
+        renderDownloads();
+      });
+    });
+  }
+
+  /* --------------------------------------------------------- notice UI ----- */
+  function refreshNoticePreview() {
+    var t = (val("nt-text") || "").trim();
+    var pv = $("nt-pv-text");
+    if (pv) pv.textContent = t || "—";
+    var ac = $("nt-pv-accent");
+    if (ac) ac.style.background = trimv("nt-color") || "#8A3FFC";
   }
 
   /* ----------------------------------------------------- custom donate UI -- */
@@ -410,11 +524,13 @@
     Array.prototype.forEach.call(document.querySelectorAll(".tab"), function (t) {
       t.classList.toggle("active", t.getAttribute("data-tab") === name);
     });
-    ["tracking", "links", "home", "donate", "preview", "publish"].forEach(function (n) {
+    ["tracking", "links", "home", "donate", "downloads", "notice", "preview", "publish"].forEach(function (n) {
       var s = $("tab-" + n);
       if (s) s.classList.toggle("hidden", n !== name);
     });
     if (name === "tracking") loadStats();
+    if (name === "downloads") renderDownloads();
+    if (name === "notice") refreshNoticePreview();
     if (name === "preview") refreshPreview();
     if (name === "publish") updateJsonPreview();
   }
@@ -485,6 +601,33 @@
       setVal("cust-coin", ""); setVal("cust-addr", ""); setVal("cust-logo", "");
       renderCustom(); refreshPreview();
       toast("آدرس اضافه شد");
+    });
+
+    // v6.3 — download links add
+    var adl = $("btn-add-dl");
+    if (adl) adl.addEventListener("click", function () {
+      var title = trimv("dl-title"), url = trimv("dl-url"), note = trimv("dl-item-note");
+      if (!url) { toast("لینک را وارد کنید"); return; }
+      if (!/^https?:\/\//i.test(url)) { toast("لینک باید با http:// یا https:// شروع شود"); return; }
+      downloadItems.push({ title: title || ("لینک " + (downloadItems.length + 1)), url: url, note: note });
+      setVal("dl-title", ""); setVal("dl-url", ""); setVal("dl-item-note", "");
+      renderDownloads();
+      toast("لینک اضافه شد");
+    });
+    ["dl-title", "dl-url", "dl-item-note"].forEach(function (id) {
+      var e = $(id);
+      if (e) e.addEventListener("keydown", function (ev) {
+        if (ev.key === "Enter" && adl) adl.click();
+      });
+    });
+
+    // v6.3 — notice live preview
+    ["nt-text", "nt-color", "nt-enabled"].forEach(function (id) {
+      var e = $(id);
+      if (e) {
+        e.addEventListener("input", refreshNoticePreview);
+        e.addEventListener("change", refreshNoticePreview);
+      }
     });
 
     // publish

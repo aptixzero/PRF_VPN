@@ -20,7 +20,7 @@
             android:layout_height="wrap_content"
             android:layout_weight="1"
             android:text="@string/configs_title"
-            android:textColor="@color/violet_bright"
+            android:textColor="?attr/appAccentViolet"
             android:textSize="18sp"
             android:textStyle="bold"
             android:letterSpacing="0.18"
@@ -32,7 +32,7 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:text="@string/select_mode"
-            android:textColor="@color/violet_bright"
+            android:textColor="?attr/appAccentViolet"
             android:textSize="11sp"
             android:textStyle="bold"
             android:paddingHorizontal="14dp"
@@ -82,7 +82,7 @@
             android:layout_weight="1"
             android:gravity="center"
             android:text="@string/ping_all"
-            android:textColor="@color/violet_bright"
+            android:textColor="?attr/appAccentViolet"
             android:textSize="11sp"
             android:textStyle="bold"
             android:background="@drawable/btn_secondary"
@@ -97,7 +97,7 @@
             android:layout_weight="1"
             android:gravity="center"
             android:text="@string/select_all"
-            android:textColor="@color/violet_bright"
+            android:textColor="?attr/appAccentViolet"
             android:textSize="11sp"
             android:textStyle="bold"
             android:background="@drawable/btn_outline"
@@ -113,7 +113,7 @@
             android:layout_weight="1"
             android:gravity="center"
             android:text="@string/copy_selected"
-            android:textColor="@color/neon_blue"
+            android:textColor="?attr/appAccentBlue"
             android:textSize="11sp"
             android:textStyle="bold"
             android:background="@drawable/btn_outline"
@@ -146,6 +146,45 @@
         android:orientation="vertical"
         android:layout_marginTop="12dp"
         android:visibility="gone">
+
+        <!-- v6.3 — the CANCEL button sits ABOVE the progress bar, exactly where
+             the brief asked for it. Pressing it stops the sweep cleanly through
+             PingService.cancel() (co-operative cancellation), so nothing is
+             corrupted and the list keeps whatever results were already
+             measured — no disruption. -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:layout_marginBottom="8dp">
+
+            <TextView
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="@string/ping_all"
+                android:textColor="?attr/appTextSecondary"
+                android:textSize="11sp"
+                android:maxLines="1"
+                android:ellipsize="end" />
+
+            <TextView
+                android:id="@+id/btn_cancel_ping"
+                android:layout_width="wrap_content"
+                android:layout_height="32dp"
+                android:gravity="center"
+                android:minWidth="76dp"
+                android:paddingHorizontal="14dp"
+                android:text="@string/cancel_ping"
+                android:textColor="#FFFFFFFF"
+                android:textSize="12sp"
+                android:textStyle="bold"
+                android:background="@drawable/btn_cancel_bg"
+                android:clickable="true"
+                android:focusable="true"
+                android:foreground="?attr/selectableItemBackground" />
+        </LinearLayout>
 
         <ProgressBar
             android:id="@+id/sweep_progress"

@@ -68,4 +68,20 @@
     <color name="ltext_dim">#FFA59CB5</color>
     <color name="lneon_green">#FF7C3AED</color>
     <color name="lneon_red">#FFDC2626</color>
+
+    <!-- ===== v6.3 LIGHT-theme additions =====
+         The light theme previously only defined a handful of colours, so every
+         surface that was painted from a hard-coded dark constant stayed black.
+         These are the matched light equivalents referenced by the new semantic
+         attributes in attrs.xml. They are deliberately kept in the same
+         violet family as the dark theme so the brand reads identically. -->
+    <color name="lbg_chip">#FFF7F5FC</color>          <!-- stat tile bottom gradient -->
+    <color name="lbg_card_active">#FFEDE4FE</color>   <!-- selected server row -->
+    <color name="lstroke">#1A160E22</color>           <!-- generic hairline -->
+    <color name="lhairline">#14160E22</color>         <!-- very soft divider -->
+    <color name="lcard_border">#FFE3DEF0</color>      <!-- card outline -->
+    <color name="lcard_border_lite">#FFEDE9F6</color> <!-- softer card outline -->
+    <color name="lviolet_accent">#FF6D28D9</color>    <!-- readable violet on white -->
+    <color name="lneon_blue">#FF4F46E5</color>
+    <color name="lneon_purple">#FF7E22CE</color>
 </resources>

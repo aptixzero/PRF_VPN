@@ -18,7 +18,7 @@
         android:layout_height="wrap_content"
         android:layout_marginTop="2dp"
         android:text="@string/donate_heading"
-        android:textColor="@color/violet_bright"
+        android:textColor="?attr/appAccentViolet"
         android:textSize="19sp"
         android:textStyle="bold"
         android:letterSpacing="0.06"

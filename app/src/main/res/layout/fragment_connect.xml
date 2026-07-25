@@ -45,7 +45,7 @@
                     android:layout_height="20dp"
                     android:layout_gravity="center"
                     android:src="@drawable/ic_telegram"
-                    app:tint="@color/violet_bright" />
+                    app:tint="?attr/appAccentViolet" />
             </FrameLayout>
 
             <ImageView
@@ -79,11 +79,67 @@
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:text="@string/app_tagline"
-                    android:textColor="@color/violet_bright"
+                    android:textColor="?attr/appAccentViolet"
                     android:textSize="8sp"
                     android:letterSpacing="0.24"
                     android:layout_marginTop="1dp" />
             </LinearLayout>
+        </LinearLayout>
+
+        <!-- ===== v6.3 in-app announcement (اعلان Professor Vpn) ===== -->
+        <LinearLayout
+            android:id="@+id/notice_card"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:visibility="gone"
+            android:background="@drawable/notice_card_bg"
+            android:padding="12dp"
+            android:layout_marginTop="4dp">
+
+            <View
+                android:id="@+id/notice_accent"
+                android:layout_width="3dp"
+                android:layout_height="match_parent"
+                android:layout_marginEnd="10dp"
+                android:background="?attr/appAccentViolet" />
+
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:orientation="vertical">
+
+                <TextView
+                    android:id="@+id/notice_title"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/notice_title"
+                    android:textColor="?attr/appAccentViolet"
+                    android:textSize="11sp"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:id="@+id/notice_text"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:textColor="?attr/appTextPrimary"
+                    android:textSize="12sp"
+                    android:lineSpacingExtra="2dp"
+                    android:layout_marginTop="3dp" />
+            </LinearLayout>
+
+            <ImageView
+                android:id="@+id/notice_close"
+                android:layout_width="22dp"
+                android:layout_height="22dp"
+                android:layout_marginStart="8dp"
+                android:src="@drawable/ic_close"
+                android:clickable="true"
+                android:focusable="true"
+                android:background="?attr/selectableItemBackgroundBorderless"
+                app:tint="?attr/appTextSecondary"
+                android:contentDescription="@string/close" />
         </LinearLayout>
 
         <!-- ===== Server selector card ===== -->
@@ -100,10 +156,30 @@
             android:foreground="?attr/selectableItemBackground"
             android:layout_marginTop="4dp">
 
-            <View
+            <!-- v6.3 — COUNTRY FLAG holder. Empty by default; when connected the
+                 flag of the server's country is drawn here as a Unicode emoji so
+                 there is no image download and therefore zero lag/freeze. The
+                 square is small, so the glyph is clipped to it and never spills. -->
+            <FrameLayout
+                android:id="@+id/flag_box"
                 android:layout_width="34dp"
                 android:layout_height="34dp"
-                android:background="@drawable/proto_tag_bg" />
+                android:clipChildren="true"
+                android:clipToPadding="true"
+                android:background="@drawable/proto_tag_bg">
+
+                <TextView
+                    android:id="@+id/flag_text"
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"
+                    android:gravity="center"
+                    android:includeFontPadding="false"
+                    android:text=""
+                    android:maxLines="1"
+                    android:ellipsize="none"
+                    android:textSize="17sp"
+                    android:textColor="?attr/appTextPrimary" />
+            </FrameLayout>
 
             <LinearLayout
                 android:layout_width="0dp"
@@ -116,7 +192,7 @@
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:text="@string/select_server"
-                    android:textColor="@color/violet_bright"
+                    android:textColor="?attr/appAccentViolet"
                     android:textSize="9sp"
                     android:letterSpacing="0.18" />
 
@@ -137,7 +213,7 @@
                 android:layout_width="22dp"
                 android:layout_height="22dp"
                 android:src="@drawable/ic_chevron_right"
-                app:tint="@color/text_secondary"
+                app:tint="?attr/appTextSecondary"
                 android:contentDescription="@string/select_server" />
         </LinearLayout>
 
@@ -256,7 +332,7 @@
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:text="@string/download"
-                    android:textColor="@color/violet_bright"
+                    android:textColor="?attr/appAccentViolet"
                     android:textSize="9sp"
                     android:letterSpacing="0.14" />
                 <TextView
@@ -292,7 +368,7 @@
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:text="@string/upload"
-                    android:textColor="@color/neon_blue"
+                    android:textColor="?attr/appAccentBlue"
                     android:textSize="9sp"
                     android:letterSpacing="0.14" />
                 <TextView
@@ -328,7 +404,7 @@
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:text="@string/duration"
-                    android:textColor="@color/neon_purple"
+                    android:textColor="?attr/appAccentPurple"
                     android:textSize="9sp"
                     android:letterSpacing="0.14" />
                 <TextView
@@ -380,7 +456,7 @@
             <View
                 android:layout_width="1dp"
                 android:layout_height="match_parent"
-                android:background="@color/card_border_lite" />
+                android:background="?attr/appCardBorderLite" />
 
             <LinearLayout
                 android:layout_width="0dp"
@@ -409,7 +485,7 @@
             <View
                 android:layout_width="1dp"
                 android:layout_height="match_parent"
-                android:background="@color/card_border_lite" />
+                android:background="?attr/appCardBorderLite" />
 
             <LinearLayout
                 android:layout_width="0dp"
@@ -451,19 +527,18 @@
                 android:layout_weight="1"
                 android:orientation="vertical"
                 android:gravity="center"
-                android:clickable="true"
-                android:focusable="true">
+                android:clickable="false"
+                android:focusable="false">
                 <FrameLayout
                     android:layout_width="50dp"
                     android:layout_height="50dp"
-                    android:background="@drawable/quick_action_bg"
-                    android:foreground="?attr/selectableItemBackgroundBorderless">
+                    android:background="@drawable/quick_action_bg">
                     <ImageView
                         android:layout_width="22dp"
                         android:layout_height="22dp"
                         android:layout_gravity="center"
                         android:src="@drawable/ic_bolt"
-                        app:tint="@color/violet_bright" />
+                        app:tint="?attr/appAccentViolet" />
                 </FrameLayout>
                 <TextView
                     android:layout_width="wrap_content"
@@ -482,19 +557,18 @@
                 android:layout_weight="1"
                 android:orientation="vertical"
                 android:gravity="center"
-                android:clickable="true"
-                android:focusable="true">
+                android:clickable="false"
+                android:focusable="false">
                 <FrameLayout
                     android:layout_width="50dp"
                     android:layout_height="50dp"
-                    android:background="@drawable/quick_action_bg"
-                    android:foreground="?attr/selectableItemBackgroundBorderless">
+                    android:background="@drawable/quick_action_bg">
                     <ImageView
                         android:layout_width="22dp"
                         android:layout_height="22dp"
                         android:layout_gravity="center"
                         android:src="@drawable/ic_shield"
-                        app:tint="@color/violet_bright" />
+                        app:tint="?attr/appAccentViolet" />
                 </FrameLayout>
                 <TextView
                     android:layout_width="wrap_content"
@@ -513,19 +587,18 @@
                 android:layout_weight="1"
                 android:orientation="vertical"
                 android:gravity="center"
-                android:clickable="true"
-                android:focusable="true">
+                android:clickable="false"
+                android:focusable="false">
                 <FrameLayout
                     android:layout_width="50dp"
                     android:layout_height="50dp"
-                    android:background="@drawable/quick_action_bg"
-                    android:foreground="?attr/selectableItemBackgroundBorderless">
+                    android:background="@drawable/quick_action_bg">
                     <ImageView
                         android:layout_width="22dp"
                         android:layout_height="22dp"
                         android:layout_gravity="center"
                         android:src="@drawable/ic_swap"
-                        app:tint="@color/violet_bright" />
+                        app:tint="?attr/appAccentViolet" />
                 </FrameLayout>
                 <TextView
                     android:layout_width="wrap_content"
@@ -556,7 +629,7 @@
                         android:layout_height="22dp"
                         android:layout_gravity="center"
                         android:src="@drawable/ic_settings"
-                        app:tint="@color/violet_bright" />
+                        app:tint="?attr/appAccentViolet" />
                 </FrameLayout>
                 <TextView
                     android:layout_width="wrap_content"

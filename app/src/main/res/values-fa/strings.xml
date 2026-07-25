@@ -156,4 +156,35 @@
     <!-- ===== v5.7 — Auto Test probe result messages ===== -->
     <string name="probe_error">خطا در ارتباط — لطفاً دوباره تلاش کنید</string>
     <string name="probe_saved">%1$d کانفیگ به Free Configs اضافه شد — در حال تست…</string>
+
+    <!-- ===== v6.3 — اعلان درون‌برنامه‌ای ===== -->
+    <!-- هرگز نباید اشاره‌ای به پنل مدیریت داشته باشد. -->
+    <string name="notice_title">اعلان Professor Vpn</string>
+
+    <!-- ===== v6.3 — صفحه لینک‌های دانلود ===== -->
+    <string name="menu_downloads">لینک‌های دانلود</string>
+    <string name="downloads_title">لینک‌های دانلود</string>
+    <string name="downloads_heading">اشتراک‌گذاری و دانلود Professor VPN</string>
+    <string name="downloads_note">با گوشی کناری این کد را اسکن کنید تا برنامه از طریق بلوتوث ارسال شود، یا از لینک‌های دانلود پایین استفاده کنید.</string>
+    <string name="downloads_qr_hint">دوربین گوشی مقابل را روی این کد بگیرید</string>
+    <string name="downloads_share_bt">ارسال برنامه با بلوتوث</string>
+    <string name="downloads_bt_prompt">بلوتوث دستگاه مقابل هم باید روشن باشد.</string>
+    <string name="downloads_bt_enabling">در حال روشن کردن بلوتوث…</string>
+    <string name="downloads_bt_ready">بلوتوث روشن شد — دستگاه کناری را انتخاب کنید</string>
+    <string name="downloads_bt_denied">برای ارسال برنامه، اجازهٔ بلوتوث لازم است</string>
+    <string name="downloads_bt_unsupported">این دستگاه بلوتوث ندارد</string>
+    <string name="downloads_bt_failed">شروع انتقال بلوتوث ممکن نشد</string>
+    <string name="downloads_links_header">لینک‌های دانلود</string>
+    <string name="downloads_empty">هنوز لینک دانلودی منتشر نشده است.</string>
+    <string name="downloads_copy">کپی</string>
+    <string name="downloads_copied">لینک کپی شد</string>
+    <string name="downloads_open">باز کردن</string>
+    <string name="downloads_share_link">اشتراک لینک</string>
+
+    <!-- ===== v6.3 — لغو پینگ همه ===== -->
+    <string name="cancel_ping">لغو</string>
+    <string name="ping_cancelled">پینگ لغو شد</string>
+
+    <!-- ===== v6.3 — توقف خودکار Auto Test ===== -->
+    <string name="autotest_auto_stopped">Auto Test متوقف شد — کانفیگ جدیدی اضافه نشد</string>
 </resources>

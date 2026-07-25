@@ -1,16 +1,17 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Connect screen quick-toggle: circular dark button w/ violet outline; lit when active. -->
+<!-- Connect screen quick-action tile. v6.3 — theme-aware; these are now
+     DISPLAY-ONLY indicators (except Settings), so there is no pressed state. -->
 <selector xmlns:android="http://schemas.android.com/apk/res/android">
     <item android:state_activated="true">
         <shape android:shape="oval">
-            <solid android:color="#33000000" />
+            <solid android:color="?attr/appCardActiveColor" />
             <stroke android:width="1.4dp" android:color="@color/state_connected" />
         </shape>
     </item>
     <item>
         <shape android:shape="oval">
-            <solid android:color="#FF0B0816" />
-            <stroke android:width="1.2dp" android:color="@color/card_border_lite" />
+            <solid android:color="?attr/appSurfaceColor" />
+            <stroke android:width="1.2dp" android:color="?attr/appCardBorderLite" />
         </shape>
     </item>
 </selector>

@@ -58,7 +58,21 @@ data class RemoteConfig(
      * image may be a remote URL (uploaded from the panel) — if blank, the banner
      * shows [homeBanner].text with [homeBanner].textColor.
      */
-    val homeBanner: HomeBanner = HomeBanner()
+    val homeBanner: HomeBanner = HomeBanner(),
+    /**
+     * v6.3 — the "Download Links" page (drawer → Download Links). The panel can
+     * add UNLIMITED entries; the app renders them in a scrollable list where each
+     * row has a Copy button so the user can paste the link in a browser.
+     */
+    val downloadLinks: DownloadLinksConfig = DownloadLinksConfig(),
+    /**
+     * v6.3 — the admin "Notifications" tab. Whatever the operator types is shown
+     * in-app as an announcement titled "اعلان Professor Vpn". It NEVER mentions
+     * that it came from an admin panel.
+     */
+    val notice: NoticeConfig = NoticeConfig(),
+    /** v6.3 — newest published APK version string, e.g. "6.3". */
+    val latestApkVersion: String = ""
 ) {
 
     /** A single crypto donation entry. */
@@ -175,7 +189,10 @@ data class RemoteConfig(
             sponsor = SponsorConfig(),
             donate = DonateConfig(),
             homeCta = HomeCta(),
-            homeBanner = HomeBanner()
+            homeBanner = HomeBanner(),
+            downloadLinks = DownloadLinksConfig(),
+            notice = NoticeConfig(),
+            latestApkVersion = ""
         )
 
         /** Resolve the CTA label for the given language ("fa" | "en"). */
@@ -221,7 +238,17 @@ data class RemoteConfig(
                     sponsor = parseSponsor(o.optJSONObject("sponsor"), def.sponsor),
                     donate = parseDonate(o.optJSONObject("donate"), def.donate),
                     homeCta = parseHomeCta(o.optJSONObject("homeCta"), def.homeCta),
-                    homeBanner = parseHomeBanner(o.optJSONObject("homeBanner"), def.homeBanner)
+                    homeBanner = parseHomeBanner(o.optJSONObject("homeBanner"), def.homeBanner),
+                    downloadLinks = DownloadLinksConfig.parse(
+                        o.optJSONObject("downloadLinks") ?: o.optJSONObject("downloads"),
+                        def.downloadLinks
+                    ),
+                    notice = NoticeConfig.parse(
+                        o.optJSONObject("notice") ?: o.optJSONObject("notification")
+                            ?: o.optJSONObject("notifications"),
+                        def.notice
+                    ),
+                    latestApkVersion = o.optString("latestApkVersion", def.latestApkVersion)
                 )
             } catch (_: Throwable) {
                 def

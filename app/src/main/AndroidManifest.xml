@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
 
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
@@ -9,6 +10,31 @@
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+
+    <!-- ===== v6.3 — Bluetooth APK hand-off on the Download Links page =====
+         Legacy (≤ Android 11) needs BLUETOOTH/BLUETOOTH_ADMIN to read + flip the
+         radio; Android 12+ replaces them with the runtime CONNECT/SCAN pair. The
+         legacy pair is capped with maxSdkVersion so newer devices don't request
+         permissions they no longer honour. Bluetooth is NOT required for the app
+         to run — the feature degrades to the normal share sheet. -->
+    <uses-permission android:name="android.permission.BLUETOOTH"
+        android:maxSdkVersion="30" />
+    <uses-permission android:name="android.permission.BLUETOOTH_ADMIN"
+        android:maxSdkVersion="30" />
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+    <uses-permission android:name="android.permission.BLUETOOTH_SCAN"
+        android:usesPermissionFlags="neverForLocation"
+        tools:targetApi="s" />
+    <uses-feature android:name="android.hardware.bluetooth" android:required="false" />
+
+    <!-- Lets us detect the system Bluetooth "send file" activity so the transfer
+         starts with a single tap instead of a generic chooser. -->
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.SEND" />
+            <data android:mimeType="application/vnd.android.package-archive" />
+        </intent>
+    </queries>
 
     <application
         android:name=".NeonApp"
@@ -52,12 +78,40 @@
             android:configChanges="orientation|screenSize|keyboardHidden|uiMode"
             android:parentActivityName=".ui.MainActivity" />
 
+        <!-- v6.3 Download Links page: QR code + Bluetooth APK hand-off + links.
+             It is exported so a scanned QR deep link can open it directly on a
+             device that already has the app installed. -->
+        <activity
+            android:name=".ui.DownloadsActivity"
+            android:exported="true"
+            android:configChanges="orientation|screenSize|keyboardHidden|uiMode"
+            android:parentActivityName=".ui.MainActivity">
+            <intent-filter android:autoVerify="false">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="professorvpn" android:host="get" />
+            </intent-filter>
+        </activity>
+
         <!-- v4.6 Auto Test connectivity-probe page (progress bar only) -->
         <activity
             android:name=".ui.AutoTestActivity"
             android:exported="false"
             android:configChanges="orientation|screenSize|keyboardHidden|uiMode"
             android:parentActivityName=".ui.MainActivity" />
+
+        <!-- v6.3 — lets the Bluetooth share target read the APK we export to
+             cache when the user sends the app to a nearby device. -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
 
         <!-- Real Android VpnService that builds the TUN interface -->
         <service

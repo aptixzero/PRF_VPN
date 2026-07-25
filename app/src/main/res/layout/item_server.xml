@@ -29,7 +29,7 @@
         android:minWidth="56dp"
         android:gravity="center"
         android:text="VLESS"
-        android:textColor="@color/violet_bright"
+        android:textColor="?attr/appAccentViolet"
         android:textSize="9sp"
         android:textStyle="bold"
         android:letterSpacing="0.06"
@@ -77,7 +77,7 @@
         android:src="@drawable/ic_ping"
         android:background="?attr/selectableItemBackgroundBorderless"
         android:contentDescription="ping"
-        app:tint="@color/violet_bright" />
+        app:tint="?attr/appAccentViolet" />
 
     <!-- per-config COPY -->
     <ImageView
@@ -88,7 +88,7 @@
         android:src="@drawable/ic_copy"
         android:background="?attr/selectableItemBackgroundBorderless"
         android:contentDescription="copy"
-        app:tint="@color/neon_blue" />
+        app:tint="?attr/appAccentBlue" />
 
     <!-- per-config DELETE -->
     <ImageView

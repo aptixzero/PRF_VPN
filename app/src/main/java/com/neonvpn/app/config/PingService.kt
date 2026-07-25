@@ -250,10 +250,30 @@ object PingService {
         return true
     }
 
-    /** Cancel any running sweep (e.g. user cleared the list). */
+    /**
+     * Cancel any running sweep (user pressed the v6.3 CANCEL button, or the list
+     * was cleared).
+     *
+     * v6.3 — cancelling must be NON-DISRUPTIVE:
+     *   • every result that was already measured stays exactly as it is, so the
+     *     user keeps the pings they waited for;
+     *   • every row that was still `Testing` is flipped back to `Idle` so no row
+     *     is left spinning "Pinging…" forever after the sweep goes away;
+     *   • the sweep state is published as stopped synchronously, so the UI
+     *     re-enables PING ALL / SELECT / per-row PING immediately.
+     */
     fun cancel() {
         sweepJob?.cancel()
         sweepJob = null
+        // Clear the orphaned spinners without touching finished measurements.
+        val snapshot = _statuses.value
+        if (snapshot.values.any { it === PingStatus.Testing }) {
+            val cleaned = HashMap<String, PingStatus>(snapshot.size)
+            snapshot.forEach { (k, v) ->
+                if (v !== PingStatus.Testing) cleaned[k] = v
+            }
+            _statuses.value = cleaned
+        }
         _sweep.value = SweepState(running = false, tested = 0, total = 0)
     }
 

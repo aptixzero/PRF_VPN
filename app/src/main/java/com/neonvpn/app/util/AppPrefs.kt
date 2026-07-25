@@ -86,6 +86,25 @@ object AppPrefs {
         prefs(ctx).edit().putBoolean(KEY_AUTOTEST_ON, on).apply()
     }
 
+    // ------------------------------------------------------- v6.3 announcement
+    /** Id of the last announcement the user explicitly closed. */
+    private const val KEY_NOTICE_SEEN = "notice_seen_id"
+
+    /**
+     * True when the user already dismissed exactly this announcement. A NEW
+     * announcement (different id) always reappears, so the operator can push a
+     * fresh message at any time and it will be shown again.
+     */
+    fun isNoticeDismissed(ctx: Context, id: String): Boolean {
+        if (id.isBlank()) return false
+        return prefs(ctx).getString(KEY_NOTICE_SEEN, "") == id
+    }
+
+    fun dismissNotice(ctx: Context, id: String) {
+        if (id.isBlank()) return
+        prefs(ctx).edit().putString(KEY_NOTICE_SEEN, id).apply()
+    }
+
     // ---------------------------------------------------------------- locale
     /**
      * Wrap a base [Context] so all resources resolve in the chosen language.

@@ -268,6 +268,12 @@ class FreeConfigsFragment : Fragment() {
                             btnAutoTest.text = getString(R.string.auto_test)
                             hideProgressDelayed()
                             reloadFromStore()
+                            // v6.3 — the engine gave up by itself (it could not add
+                            // configs even after the full recovery ladder). The brief
+                            // requires Auto Test to TURN ITSELF OFF in that case
+                            // rather than sit there "pointlessly ON" with an empty
+                            // list, so tell the user plainly why the button flipped.
+                            if (p.autoStopped) toast(getString(R.string.autotest_auto_stopped))
                         }
                     }
                 }

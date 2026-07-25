@@ -13,4 +13,43 @@
     <attr name="appAccentRed" format="color" />
     <attr name="appStroke" format="color" />
     <attr name="appBgDrawable" format="reference" />
+
+    <!-- ===================================================================
+         v6.3 LIGHT-THEME FIX.
+
+         Before v6.3 a large part of the UI was painted with HARD-CODED dark
+         colours (`#FF0B0816`, `@color/violet_bright`, `@color/text_secondary`,
+         …), both directly in layouts and inside shape drawables. In the light
+         theme that produced black-on-white cards, near-invisible pale-violet
+         labels and unreadable stat tiles — the "app is broken in light theme"
+         report.
+
+         The fix is to route EVERY remaining surface / accent / hairline through
+         a semantic attribute, so the exact same layout and the exact same
+         drawable render correctly under both themes with matched, synced
+         colours. The dark theme keeps the original values verbatim, so the dark
+         look is byte-for-byte unchanged.
+         =================================================================== -->
+
+    <!-- Brand violet used for small labels & icon tints. In light mode it is
+         darkened so it stays legible on a white card. -->
+    <attr name="appAccentViolet" format="color" />
+    <!-- Secondary accents used by the stat tiles. -->
+    <attr name="appAccentBlue" format="color" />
+    <attr name="appAccentPurple" format="color" />
+
+    <!-- Card / chip surfaces used inside shape drawables. -->
+    <attr name="appChipTopColor" format="color" />
+    <attr name="appChipBottomColor" format="color" />
+    <attr name="appSurfaceColor" format="color" />
+    <attr name="appTabBarColor" format="color" />
+
+    <!-- Hairlines & borders used inside shape drawables. -->
+    <attr name="appHairline" format="color" />
+    <attr name="appCardBorder" format="color" />
+    <attr name="appCardBorderLite" format="color" />
+
+    <!-- The small protocol / flag tag square. -->
+    <attr name="appTagFill" format="color" />
+    <attr name="appTagStroke" format="color" />
 </resources>

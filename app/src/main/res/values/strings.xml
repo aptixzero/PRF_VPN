@@ -178,4 +178,36 @@
     <!-- ===== v5.7 — Auto Test probe result messages ===== -->
     <string name="probe_error">Connection error — please try again</string>
     <string name="probe_saved">%1$d config(s) added to Free Configs — testing…</string>
+
+    <!-- ===== v6.3 — in-app announcement ===== -->
+    <!-- NOTE: this must NEVER mention an admin panel. It is branded as an
+         announcement from Professor VPN itself. -->
+    <string name="notice_title">اعلان Professor Vpn</string>
+
+    <!-- ===== v6.3 — Download Links page ===== -->
+    <string name="menu_downloads">Download Links</string>
+    <string name="downloads_title">Download Links</string>
+    <string name="downloads_heading">Share &amp; download Professor VPN</string>
+    <string name="downloads_note">Scan the code with a nearby phone to receive the app over Bluetooth, or use one of the download links below.</string>
+    <string name="downloads_qr_hint">Point the other phone\'s camera at this code</string>
+    <string name="downloads_share_bt">Send app over Bluetooth</string>
+    <string name="downloads_bt_prompt">Make sure Bluetooth is ON on the other device too.</string>
+    <string name="downloads_bt_enabling">Turning Bluetooth on…</string>
+    <string name="downloads_bt_ready">Bluetooth is on — choose the nearby device</string>
+    <string name="downloads_bt_denied">Bluetooth permission is required to send the app</string>
+    <string name="downloads_bt_unsupported">This device has no Bluetooth</string>
+    <string name="downloads_bt_failed">Could not start the Bluetooth transfer</string>
+    <string name="downloads_links_header">Download links</string>
+    <string name="downloads_empty">No download links have been published yet.</string>
+    <string name="downloads_copy">Copy</string>
+    <string name="downloads_copied">Link copied</string>
+    <string name="downloads_open">Open</string>
+    <string name="downloads_share_link">Share link</string>
+
+    <!-- ===== v6.3 — Ping All cancel ===== -->
+    <string name="cancel_ping">Cancel</string>
+    <string name="ping_cancelled">Ping cancelled</string>
+
+    <!-- ===== v6.3 — Auto Test auto-stop ===== -->
+    <string name="autotest_auto_stopped">Auto Test stopped — no new configs could be added</string>
 </resources>
