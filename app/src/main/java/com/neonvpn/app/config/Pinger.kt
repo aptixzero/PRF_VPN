@@ -115,6 +115,24 @@ object Pinger {
     /** Latency upper bound for a node we still treat as "reachable". */
     private const val MAX_VALID_MS = 8_000L
 
+    /**
+     * v6.3 — how many of the [SAMPLE_COUNT] round-trips must SUCCEED before we
+     * are willing to call a node reachable and show a green ping.
+     *
+     * Two (not one) is the whole fix for "it pings 150 ms but the connection
+     * doesn't work". A dead-but-answering node reliably passes ONE tiny 204 and
+     * then stops; it almost never passes two in a row. Requiring two costs a few
+     * hundred milliseconds per config and removes nearly all the false greens.
+     */
+    private const val MIN_GOOD_SAMPLES = 2
+
+    /**
+     * v6.3 — how many failed round-trips we tolerate while sampling before
+     * giving up on the reference endpoint. Raised from 2 to 3 so a single
+     * hiccup on a weak mobile link doesn't discard an otherwise good node.
+     */
+    private const val MAX_SAMPLE_FAILS = 3
+
     suspend fun ping(cfg: ServerConfig): Long = withContext(Dispatchers.IO) {
         // Only vless / vmess are buildable; anything else is unreachable here.
         if (cfg.protocol != "vless" && cfg.protocol != "vmess") return@withContext UNREACHABLE
@@ -160,12 +178,33 @@ object Pinger {
 
             // gather additional samples against the SAME reference endpoint.
             var fails = 0
-            while (samples.size < SAMPLE_COUNT && fails < 2) {
+            while (samples.size < SAMPLE_COUNT && fails < MAX_SAMPLE_FAILS) {
                 val ms = singleProbe(json, refUrl)
                 if (ms in 1..MAX_VALID_MS) samples.add(ms) else fails++
             }
 
-            if (samples.isNotEmpty()) median(samples) else UNREACHABLE
+            // ── v6.3 QUALITY GATE ────────────────────────────────────────────
+            // The v6.2 rule ("one confirmed round-trip == reachable") is exactly
+            // what produced the reported bug: "sometimes it shows ping 100–200
+            // but when we connect it doesn't work at all, or is very weak."
+            //
+            // A single successful handshake is NOT proof of a usable tunnel. On
+            // a heavily-shaped link a dying node very often answers the first
+            // tiny 204 and then collapses — so it advertised a pretty 150 ms and
+            // was useless the moment real traffic started.
+            //
+            // From v6.3 a node must SUSTAIN the tunnel: at least
+            // [MIN_GOOD_SAMPLES] separate round-trips have to succeed against
+            // the SAME endpoint. That single change filters out the "pings but
+            // won't carry traffic" nodes before the user ever taps connect.
+            if (samples.size < MIN_GOOD_SAMPLES) return@withTimeoutOrNull UNREACHABLE
+
+            // Report the WORSE of median and mean so a node with one lucky fast
+            // sample and one slow one is not flattered — the number the user
+            // sees is closer to what they will actually feel.
+            val med = median(samples)
+            val mean = samples.sum() / samples.size
+            maxOf(med, mean)
         }
         result ?: UNREACHABLE
     }

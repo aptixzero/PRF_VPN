@@ -12,6 +12,7 @@ import android.view.View
 import android.view.animation.LinearInterpolator
 import kotlin.math.PI
 import kotlin.math.cos
+import kotlin.math.exp
 import kotlin.math.min
 import kotlin.math.sin
 import kotlin.math.sqrt
@@ -47,7 +48,41 @@ class GlobeConnectView @JvmOverloads constructor(
 
     private var anim: ValueAnimator? = null
     private var lastFrameMs = 0L
-    private val frameIntervalMs = 24L
+
+    /**
+     * v6.3 — SMOOTHER ANIMATION. 24 ms between frames is ~41 fps, which reads as
+     * a faint stutter on a 60/90/120 Hz panel — exactly the "animation is not
+     * good" feedback. 16 ms lets the view repaint on every vsync of a 60 Hz
+     * display (and as often as the compositor allows on faster ones). The draw
+     * itself is a handful of arcs and circles, so this is essentially free.
+     */
+    private val frameIntervalMs = 16L
+
+    // ------------------------------------------------------------------
+    // v6.3 — EASED STATE TRANSITIONS.
+    //
+    // Previously the rotation speed and the colour flipped INSTANTLY the moment
+    // the state changed, so tapping connect produced a visible jolt: the globe
+    // jumped from a slow idle spin straight to a fast connecting spin, and the
+    // violet snapped to green the instant the tunnel came up.
+    //
+    // We now keep a continuously-integrated rotation phase plus an eased
+    // "transition" value, so speed ramps and colours cross-fade. Nothing about
+    // the drawing code changes — it just receives smoothed inputs.
+    // ------------------------------------------------------------------
+
+    /** Continuously integrated rotation phase (never jumps when speed changes). */
+    private var spinPhase = 0f
+    /** Smoothed rotation speed, chases the per-state target. */
+    private var spinSpeed = 0.7f
+    /** 0→1 progress of the cross-fade into the CURRENT state's colours. */
+    private var transition = 1f
+    /** The colours we are fading FROM. */
+    private var prevColors: Triple<Int, Int, Int>? = null
+    /** Wall-clock of the previous frame, for frame-rate-independent easing. */
+    private var lastTickNs = 0L
+    /** 0..1 ping ripple used by the CONNECTED state. */
+    private var ripple = 0f
 
     private val linePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE }
     private val nodePaint = Paint(Paint.ANTI_ALIAS_FLAG)
@@ -59,6 +94,11 @@ class GlobeConnectView @JvmOverloads constructor(
 
     fun setState(s: State) {
         if (state == s) return
+        // v6.3 — remember the outgoing palette so onDraw can cross-fade into the
+        // new one instead of snapping (smooth connect/disconnect transition).
+        prevColors = colors()
+        transition = 0f
+        ripple = 0f
         state = s
         // Ensure the render loop is alive whenever the state changes — if the
         // view was detached/re-attached (app closed & reopened, tab switch,
@@ -100,22 +140,50 @@ class GlobeConnectView @JvmOverloads constructor(
             repeatCount = ValueAnimator.INFINITE
             interpolator = LinearInterpolator()
             addUpdateListener {
-                val f = it.animatedFraction
-                val speed = when (state) {
+                // ---- frame-rate-independent time step -------------------
+                val nowNs = System.nanoTime()
+                val dt = if (lastTickNs == 0L) 0.016f
+                         else ((nowNs - lastTickNs) / 1_000_000_000f).coerceIn(0f, 0.1f)
+                lastTickNs = nowNs
+
+                // ---- eased rotation speed (no more jolt on state change) --
+                val targetSpeed = when (state) {
                     State.CONNECTING -> 2.4f
                     State.CONNECTED -> 1.0f
                     State.ERROR -> 3.0f
                     State.IDLE -> 0.7f
                 }
-                spin = (f * speed) % 1f
+                // Exponential approach: fast enough to feel responsive, slow
+                // enough that the ramp is visible and pleasant.
+                spinSpeed += (targetSpeed - spinSpeed) * (1f - exp(-6f * dt))
+
+                // Integrate the phase so a speed change bends the motion rather
+                // than teleporting it.
+                spinPhase = (spinPhase + spinSpeed * dt / 14f) % 1f
+                spin = spinPhase
+
+                // ---- pulse + connected ripple ----------------------------
+                val f = it.animatedFraction
                 pulse = (0.5f + 0.5f * sin(f * 2f * PI * 3f).toFloat())
+                // A slow 2.4s ripple that only the CONNECTED state renders — it
+                // makes "connected" feel alive instead of static.
+                ripple = (ripple + dt / 2.4f) % 1f
+
+                // ---- eased glow intensity --------------------------------
                 val target = when (state) {
                     State.IDLE -> 0.42f
                     State.CONNECTING -> 0.6f + 0.25f * pulse
                     State.CONNECTED -> 0.85f + 0.1f * pulse
                     State.ERROR -> 0.5f + 0.4f * pulse
                 }
-                intensity += (target - intensity) * 0.12f
+                intensity += (target - intensity) * (1f - exp(-7f * dt))
+
+                // ---- colour cross-fade progress --------------------------
+                if (transition < 1f) {
+                    transition = (transition + dt / COLOR_FADE_SEC).coerceAtMost(1f)
+                    if (transition >= 1f) prevColors = null
+                }
+
                 val now = System.currentTimeMillis()
                 if (now - lastFrameMs >= frameIntervalMs) {
                     lastFrameMs = now
@@ -138,12 +206,44 @@ class GlobeConnectView @JvmOverloads constructor(
         State.IDLE -> Triple(0xFF8A3FFC.toInt(), 0xFFB983FF.toInt(), 0xFF4C2896.toInt())
     }
 
+    /**
+     * v6.3 — the palette actually used for drawing: the destination colours
+     * cross-faded from the previous state's colours. This is what turns the old
+     * hard violet→green snap into a smooth "locking on" transition.
+     */
+    private fun blendedColors(): Triple<Int, Int, Int> {
+        val to = colors()
+        val from = prevColors ?: return to
+        val t = ease(transition)
+        return Triple(
+            mix(from.first, to.first, t),
+            mix(from.second, to.second, t),
+            mix(from.third, to.third, t)
+        )
+    }
+
+    /** Smoothstep — no linear ramp-in/out edges. */
+    private fun ease(t: Float): Float {
+        val x = t.coerceIn(0f, 1f)
+        return x * x * (3f - 2f * x)
+    }
+
+    private fun mix(a: Int, b: Int, t: Float): Int {
+        val inv = 1f - t
+        return Color.argb(
+            (Color.alpha(a) * inv + Color.alpha(b) * t).toInt(),
+            (Color.red(a) * inv + Color.red(b) * t).toInt(),
+            (Color.green(a) * inv + Color.green(b) * t).toInt(),
+            (Color.blue(a) * inv + Color.blue(b) * t).toInt()
+        )
+    }
+
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
         val w = width.toFloat(); val h = height.toFloat()
         val cx = w / 2f; val cy = h / 2f
         val r = min(w, h) / 2f * 0.74f
-        val (main, bright, deep) = colors()
+        val (main, bright, deep) = blendedColors()
 
         // ---- outer ambient glow ----
         val glowR = r * (1.5f + 0.25f * intensity)
@@ -155,13 +255,21 @@ class GlobeConnectView @JvmOverloads constructor(
         canvas.drawCircle(cx, cy, glowR, glowPaint)
 
         // ---- connecting orbital arcs ----
+        // v6.3 — the three arcs now counter-rotate at different rates and
+        // breathe with the pulse, so "connecting" reads as active searching
+        // rather than three rings sliding together in lock-step.
         if (state == State.CONNECTING || state == State.ERROR) {
-            arcPaint.color = withAlpha(bright, 150)
             arcPaint.strokeWidth = r * 0.025f
             for (k in 0 until 3) {
                 val rr = r * (1.12f + k * 0.16f)
-                val start = (spin * 360f + k * 120f) % 360f
-                canvas.drawArc(cx - rr, cy - rr, cx + rr, cy + rr, start, 70f, false, arcPaint)
+                // alternate direction + slightly different speed per ring
+                val dir = if (k % 2 == 0) 1f else -1f
+                val rate = 1f + k * 0.35f
+                val start = (spin * 360f * rate * dir + k * 120f).mod(360f)
+                // sweep length breathes so the arcs feel like a live scan
+                val sweep = 55f + 30f * pulse + k * 8f
+                arcPaint.color = withAlpha(bright, (110 + 70 * pulse).toInt().coerceIn(0, 255))
+                canvas.drawArc(cx - rr, cy - rr, cx + rr, cy + rr, start, sweep, false, arcPaint)
             }
         }
 
@@ -195,6 +303,20 @@ class GlobeConnectView @JvmOverloads constructor(
 
         // ---- glowing nodes scattered on the sphere ----
         drawNodes(canvas, cx, cy, r, bright)
+
+        // ---- v6.3 connected: an expanding "secure" ripple ----
+        // A single soft ring that grows out of the globe and fades. It gives the
+        // connected state a calm heartbeat instead of a frozen picture.
+        if (state == State.CONNECTED) {
+            val e = ease(ripple)
+            val rr = r * (1.0f + 0.55f * e)
+            val a = ((1f - e) * 110f).toInt().coerceIn(0, 255)
+            if (a > 0) {
+                arcPaint.color = withAlpha(bright, a)
+                arcPaint.strokeWidth = r * 0.02f * (1f - e) + r * 0.004f
+                canvas.drawCircle(cx, cy, rr, arcPaint)
+            }
+        }
 
         // ---- connected: central check shield ----
         if (state == State.CONNECTED) drawShield(canvas, cx, cy, r, bright, deep)
@@ -279,6 +401,9 @@ class GlobeConnectView @JvmOverloads constructor(
         (color and 0x00FFFFFF) or (alpha.coerceIn(0, 255) shl 24)
 
     companion object {
+        /** v6.3 — seconds the idle↔connecting↔connected colour cross-fade takes. */
+        private const val COLOR_FADE_SEC = 0.55f
+
         // 24 fixed node positions [longitude, latitude] (radians). Deterministic.
         private val NODE_SEEDS: Array<FloatArray> = run {
             val list = ArrayList<FloatArray>()

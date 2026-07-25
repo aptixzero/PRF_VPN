@@ -195,6 +195,44 @@ to 0 ONLY when the source repo (`aptixzero/con_new`) rotation resets (a new publ
 which also resets file/offset). Identity/dedup is still by config CONTENT
 (`ConfigParser.dedupKey`), never by visible name.
 
+**v6.3 added two panel-driven blocks** (`config/DownloadLinks.kt`):
+
+- `downloadLinks` (alias `downloads`) → `DownloadLinksConfig(enabled, heading,
+  note, items[{id,title,url,note}])`. Rendered by `ui/DownloadsActivity` as a
+  SCROLLABLE list, each row with a COPY button. The first item also seeds the QR
+  payload. Unlimited entries; added from the panel's **Download Links** tab.
+- `notice` (aliases `notification` / `notifications`) →
+  `NoticeConfig(enabled, title, text, id, color)`. Rendered as the `notice_card`
+  at the top of `fragment_connect.xml`. The title is a BRANDED CONSTANT
+  `اعلان Professor Vpn` — the app must **never** say the message came from an
+  admin panel. `id` is stable per text; `AppPrefs.isNoticeDismissed/dismissNotice`
+  make a given announcement dismissible once while a NEW text reappears.
+
+---
+
+## 5b. v6.3 INVARIANTS (do not regress)
+
+- **`AutoTestEngine` must NOT use `ProcessLifecycleOwner.lifecycleScope`.** It owns
+  a `CoroutineScope(SupervisorJob() + Dispatchers.Default)` + a
+  `CoroutineExceptionHandler`. Screen-off / background / weak-net must never kill it.
+  When it truly cannot add configs (`MAX_EMPTY_STREAK = 6`) it calls `autoStop()`
+  and reports `Progress.autoStopped` so the SWITCH TURNS ITSELF OFF.
+- **`NeonVpnService.stopVpn()` must never block the main thread.** Flip state +
+  broadcast synchronously, then run `cleanup()` on the `vpn-stop` daemon thread with
+  a `finally { stopForegroundCompat(); stopSelf() }`. `stopThread` gives idempotency.
+- **`Pinger` needs `MIN_GOOD_SAMPLES = 2`** and reports `max(median, mean)`. A single
+  successful round-trip is NOT proof a node works.
+- **Country flags are Unicode regional-indicator emoji** (`util/CountryFlags.kt`) —
+  never bundle flag images, never block the UI thread. Two-phase: `cachedFlagFor()`
+  (zero I/O) then `resolveAsync()`.
+- **`util/QrCode.kt` is a self-contained ISO/IEC 18004 encoder.** Do not add a QR
+  dependency.
+- **Quick actions `auto_connect` / `kill_switch` / `protocol` are DISPLAY-ONLY.**
+  Only `qa_settings` is clickable.
+- **All colors in layouts/drawables go through `?attr/…`** (see `values/attrs.xml`)
+  so the LIGHT theme stays correct. The only exception is `activity_splash.xml`,
+  which is intentionally always dark.
+
 ---
 
 ## 6. ADMIN PANEL (`adminpanel/`)
@@ -202,7 +240,8 @@ which also resets file/offset). Identity/dedup is still by config CONTENT
 - `index.html` + `app.js`, fully client-side, no server.
 - Login: user/pass are stored **only as SHA-256 hashes** in `app.js`. The raw
   credentials are never in source.
-- Tabs: **In-app Ad** (with a live phone preview), **Contact**, **Publish**.
+- Tabs: **Tracking**, **Links**, **Home** (with a live phone preview), **Donate**,
+  **Download Links** (v6.3), **Notifications** (v6.3), **Preview**, **Publish**.
 - Publish writes `app_config.json` to the panel repo via the GitHub Contents API
   using a token the operator pastes at runtime (kept in `localStorage`, never
   committed).

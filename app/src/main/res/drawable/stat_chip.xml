@@ -1,12 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Stat tile: elegant near-black glass surface with a thin white hairline border. -->
+<!-- Stat tile. v6.3 — theme-aware: near-black glass in dark, white card with a
+     soft grey hairline in light. Same shape, correct in both themes. -->
 <shape xmlns:android="http://schemas.android.com/apk/res/android"
     android:shape="rectangle">
     <corners android:radius="16dp" />
     <gradient
         android:type="linear"
         android:angle="90"
-        android:startColor="#FF0C0C12"
-        android:endColor="#FF070709" />
-    <stroke android:width="1dp" android:color="@color/hairline" />
+        android:startColor="?attr/appChipTopColor"
+        android:endColor="?attr/appChipBottomColor" />
+    <stroke android:width="1dp" android:color="?attr/appHairline" />
 </shape>

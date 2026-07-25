@@ -158,6 +158,11 @@ class MainActivity : BaseActivity() {
             drawer.closeDrawer(GravityCompat.END)
             startActivity(Intent(this, SettingsActivity::class.java))
         }
+        // v6.3 — the new "Download Links" page (QR + Bluetooth share + links).
+        findViewById<android.view.View>(R.id.menu_downloads)?.setOnClickListener {
+            drawer.closeDrawer(GravityCompat.END)
+            startActivity(Intent(this, DownloadsActivity::class.java))
+        }
         findViewById<android.view.View>(R.id.menu_contact).setOnClickListener {
             drawer.closeDrawer(GravityCompat.END)
             startActivity(Intent(this, ContactActivity::class.java))

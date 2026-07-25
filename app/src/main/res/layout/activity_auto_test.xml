@@ -24,7 +24,7 @@
             android:layout_width="72dp"
             android:layout_height="72dp"
             android:src="@drawable/ic_bolt"
-            app:tint="@color/violet_bright"
+            app:tint="?attr/appAccentViolet"
             android:layout_marginBottom="20dp"
             android:contentDescription="@string/auto_test" />
 
@@ -54,7 +54,7 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:text="0%"
-            android:textColor="@color/violet_bright"
+            android:textColor="?attr/appAccentViolet"
             android:textSize="13sp"
             android:textStyle="bold"
             android:layout_marginTop="14dp" />

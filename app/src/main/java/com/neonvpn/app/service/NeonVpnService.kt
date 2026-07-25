@@ -700,13 +700,64 @@ class NeonVpnService : VpnService() {
     }
 
     // ----------------------------------------------------------------- stop
+
+    /** Guards against two overlapping STOP requests racing each other. */
+    @Volatile private var stopThread: Thread? = null
+
+    /**
+     * v6.3 — STOP BUTTON RELIABILITY FIX.
+     *
+     * The reported bug: *"sometimes the STOP button doesn't work."*
+     *
+     * Root cause: [onStartCommand] runs on the MAIN thread, and the old
+     * `stopVpn()` called [cleanup] directly from there. [cleanup] performs
+     * several BLOCKING native calls — `TProxyService.TProxyStopService()`,
+     * `xray.stop()`, closing the TUN fd, thread interrupts + implicit joins.
+     * When the tunnel was mid-handshake or the core was wedged on a dead socket
+     * those calls can block for many seconds. The result was that:
+     *
+     *   • the main thread froze, so the UI could not repaint (the button looked
+     *     "dead" and taps were swallowed);
+     *   • if it blocked past the ANR window, the whole service could be killed
+     *     by the system BEFORE the disconnect was broadcast, leaving the UI
+     *     stuck on "Connected";
+     *   • a second STOP tap re-entered `stopVpn()` and fought the first one.
+     *
+     * The fix has three parts:
+     *
+     *   1. **Flip the state FIRST, synchronously.** `stopping = true`,
+     *      `running = false` and the DISCONNECTED broadcast all happen before
+     *      any blocking work, so the UI reacts to the very first tap instantly
+     *      and every loop (watchdog / stats / tunnel) sees the stop flag at once.
+     *   2. **Do the teardown on a WORKER thread.** The main thread returns from
+     *      `onStartCommand` immediately, so there is no ANR and no frozen UI.
+     *   3. **Idempotent + always-terminating.** A second STOP while one is in
+     *      flight is a no-op instead of a race, and `stopSelf()` is called from
+     *      a `finally` so the service dies even if a native call throws.
+     */
     private fun stopVpn() {
+        // (1) Make the stop visible IMMEDIATELY — before any blocking work.
         stopping = true
+        running = false
+        isTunnelUp = false
         emitProgress(0, "Disconnected")
         broadcastState(STATE_DISCONNECTED, "")
-        cleanup()
-        stopForegroundCompat()
-        stopSelf()
+
+        // (3) Idempotent: ignore a second tap while a teardown is in flight.
+        if (stopThread?.isAlive == true) return
+
+        // (2) Blocking native teardown OFF the main thread.
+        stopThread = thread(name = "vpn-stop", isDaemon = true) {
+            try {
+                cleanup()
+            } catch (e: Throwable) {
+                Log.w(TAG, "stopVpn cleanup: ${e.message}")
+            } finally {
+                // The service MUST die even if a native call misbehaved.
+                try { stopForegroundCompat() } catch (_: Throwable) {}
+                try { stopSelf() } catch (_: Throwable) {}
+            }
+        }
     }
 
     private fun cleanup() {
@@ -739,7 +790,13 @@ class NeonVpnService : VpnService() {
             liveState = STATE_DISCONNECTED
             liveInfo = ""
         }
-        cleanup()
+        // v6.3 — when the STOP path already spawned the worker teardown, do NOT
+        // run cleanup() again here: onDestroy is on the MAIN thread and a second
+        // pass through the blocking native calls is exactly what used to hang the
+        // UI after pressing STOP. The worker thread finishes the job.
+        if (stopThread?.isAlive != true) {
+            try { cleanup() } catch (e: Throwable) { Log.w(TAG, "onDestroy cleanup: ${e.message}") }
+        }
         super.onDestroy()
     }
 

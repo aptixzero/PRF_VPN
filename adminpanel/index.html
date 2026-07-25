@@ -165,6 +165,8 @@
       <div class="tab" data-tab="links">🔗 لینک‌ها</div>
       <div class="tab" data-tab="home">🏠 صفحه اصلی</div>
       <div class="tab" data-tab="donate">💎 دونیت</div>
+      <div class="tab" data-tab="downloads">⬇️ لینک‌های دانلود</div>
+      <div class="tab" data-tab="notice">🔔 اعلان‌ها</div>
       <div class="tab" data-tab="preview">📱 پیش‌نمایش</div>
       <div class="tab" data-tab="publish">🚀 انتشار</div>
     </div>
@@ -299,6 +301,64 @@
         <label>لینک لوگوی دلخواه (اختیاری)</label>
         <input id="cust-logo" type="url" placeholder="https://…/coin.png" />
         <div id="custom-list" style="margin-top:14px"></div>
+      </div>
+    </section>
+
+    <!-- ============ DOWNLOAD LINKS ============ -->
+    <section id="tab-downloads" class="hidden">
+      <div class="card">
+        <h3>لینک‌های دانلود</h3>
+        <p class="hint">این لینک‌ها در برنامه، در منوی همبرگری → «لینک‌های دانلود» نمایش داده می‌شوند. لیست اسکرول‌شونده است و هر ردیف دکمه‌ی «کپی» دارد. اولین لینک برای ساخت بارکد (QR) استفاده می‌شود.</p>
+        <div class="row">
+          <div class="col"><label>عنوان بخش</label><input id="dl-heading" placeholder="لینک‌های دانلود" /></div>
+          <div class="col"><label>توضیح کوتاه</label><input id="dl-note" placeholder="برای دریافت نسخه جدید از لینک‌های زیر استفاده کنید" /></div>
+        </div>
+        <label class="switch" style="margin-top:10px">
+          <input type="checkbox" id="dl-enabled" checked /><span class="track"></span>
+        </label>
+        <span class="small" style="margin-inline-start:8px">نمایش صفحه لینک‌های دانلود در برنامه</span>
+      </div>
+
+      <div class="card">
+        <h3>افزودن لینک (نامحدود)</h3>
+        <div class="row">
+          <div class="col" style="max-width:200px"><label>عنوان</label><input id="dl-title" placeholder="مثلاً: دانلود مستقیم APK" /></div>
+          <div class="col"><label>لینک</label><input id="dl-url" type="url" placeholder="https://…" /></div>
+          <div class="col" style="max-width:120px;display:flex;align-items:flex-end">
+            <button class="btn btn-primary btn-sm btn-block" id="btn-add-dl">➕ افزودن</button>
+          </div>
+        </div>
+        <label>توضیح (اختیاری)</label>
+        <input id="dl-item-note" placeholder="مثلاً: نسخه یونیورسال ۶.۳" />
+        <div id="dl-list" style="margin-top:14px"></div>
+      </div>
+    </section>
+
+    <!-- ============ NOTIFICATIONS ============ -->
+    <section id="tab-notice" class="hidden">
+      <div class="card">
+        <h3>اعلان درون‌برنامه‌ای</h3>
+        <p class="hint">متن زیر در بالای صفحه اصلی برنامه به‌صورت اعلان نمایش داده می‌شود با عنوان ثابت «اعلان Professor Vpn :». کاربر می‌تواند آن را ببندد؛ با تغییر متن دوباره نمایش داده می‌شود.</p>
+        <label class="switch">
+          <input type="checkbox" id="nt-enabled" /><span class="track"></span>
+        </label>
+        <span class="small" style="margin-inline-start:8px">فعال بودن اعلان</span>
+        <div style="height:12px"></div>
+        <label>متن اعلان</label>
+        <textarea id="nt-text" style="min-height:120px" placeholder="متن اعلان خود را اینجا بنویسید…"></textarea>
+        <div class="row" style="margin-top:6px">
+          <div class="col" style="max-width:200px"><label>رنگ نوار اعلان</label><input id="nt-color" type="color" value="#8A3FFC" /></div>
+        </div>
+      </div>
+      <div class="card">
+        <h3>پیش‌نمایش اعلان</h3>
+        <div class="donate-row" style="align-items:flex-start">
+          <div style="width:4px;align-self:stretch;border-radius:4px;background:#8A3FFC" id="nt-pv-accent"></div>
+          <div style="flex:1;min-width:0">
+            <div style="font-weight:800;font-size:13px">اعلان Professor Vpn :</div>
+            <div class="small" id="nt-pv-text" style="margin-top:6px;white-space:pre-wrap">—</div>
+          </div>
+        </div>
       </div>
     </section>
 

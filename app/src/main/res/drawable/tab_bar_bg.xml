@@ -1,14 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Bottom tab bar: near-black glass with a thin white top hairline. -->
+<!-- Bottom tab bar. v6.3 — theme-aware surface + hairline. -->
 <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
     <item android:gravity="top" android:height="1dp">
         <shape android:shape="rectangle">
-            <solid android:color="@color/hairline" />
+            <solid android:color="?attr/appHairline" />
         </shape>
     </item>
     <item android:top="1dp">
         <shape android:shape="rectangle">
-            <solid android:color="#FF060608" />
+            <solid android:color="?attr/appTabBarColor" />
         </shape>
     </item>
 </layer-list>

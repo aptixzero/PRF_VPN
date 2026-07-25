@@ -49,6 +49,9 @@ class ConfigsFragment : Fragment() {
     private lateinit var sweepBar: ProgressBar
     private lateinit var sweepLabel: TextView
 
+    /** v6.3 — CANCEL button shown above the sweep bar while pinging all. */
+    private var btnCancelPing: TextView? = null
+
     /** v5.9 — true while a manual PING ALL sweep is running (pins healthy top). */
     @Volatile private var pingAllInFlight = false
 
@@ -67,6 +70,7 @@ class ConfigsFragment : Fragment() {
         sweepBox = view.findViewById(R.id.sweep_box)
         sweepBar = view.findViewById(R.id.sweep_progress)
         sweepLabel = view.findViewById(R.id.sweep_label)
+        btnCancelPing = view.findViewById(R.id.btn_cancel_ping)
 
         val recycler = view.findViewById<RecyclerView>(R.id.recycler)
         recycler.layoutManager = LinearLayoutManager(requireContext())
@@ -96,6 +100,10 @@ class ConfigsFragment : Fragment() {
         btnCopySel.setOnClickListener { copySelected() }
         btnDeleteSel.setOnClickListener { deleteSelected() }
         btnPingAll.setOnClickListener { pingAll() }
+        // v6.3 — stop the running Ping-All cleanly. PingService.cancel() is
+        // co-operative: in-flight probes finish/abort on their own and the
+        // already-measured results stay in the list, so nothing is disrupted.
+        btnCancelPing?.setOnClickListener { cancelPingAll() }
 
         refresh()
     }
@@ -125,6 +133,9 @@ class ConfigsFragment : Fragment() {
                         btnSelectMode.isEnabled = false
                         btnSelectMode.alpha = 0.4f
                         adapter.pingButtonsEnabled = false
+                        // The Cancel button is live for the whole sweep.
+                        btnCancelPing?.isEnabled = true
+                        btnCancelPing?.alpha = 1f
                     } else {
                         sweepBox.visibility = View.GONE
                         btnPingAll.isEnabled = true
@@ -132,9 +143,31 @@ class ConfigsFragment : Fragment() {
                         btnSelectMode.isEnabled = true
                         btnSelectMode.alpha = 1f
                         adapter.pingButtonsEnabled = true
+                        pingAllInFlight = false
                     }
                 }
             }
+        }
+    }
+
+    /**
+     * v6.3 — stop the running PING ALL sweep.
+     *
+     * [PingService.cancel] is co-operative: the sweep coroutine notices the
+     * cancellation between probes, publishes `running = false`, and leaves every
+     * result it already measured intact. That means pressing Cancel is safe at
+     * any moment — no half-written store, no stuck spinners, and the buttons
+     * re-enable through the normal [observeSweep] path.
+     */
+    private fun cancelPingAll() {
+        btnCancelPing?.isEnabled = false
+        btnCancelPing?.alpha = 0.5f
+        runCatching { PingService.cancel() }
+        pingAllInFlight = false
+        if (isAdded) {
+            android.widget.Toast.makeText(
+                requireContext(), R.string.ping_cancelled, android.widget.Toast.LENGTH_SHORT
+            ).show()
         }
     }
 

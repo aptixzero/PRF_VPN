@@ -67,17 +67,37 @@ object XrayConfigBuilder {
                     // The new settings give the tunnel a generous handshake window,
                     // a long idle grace so a transient cellular dip never drops it,
                     // and larger buffers so a bursty mobile link sustains full speed.
-                    put("handshake", 8)
-                    put("connIdle", 600)
-                    put("uplinkOnly", 12)
-                    put("downlinkOnly", 12)
+                    // v6.3 — WEAK-LINK TUNING. The brief asks the app to "connect
+                    // fast on very weak internet, work reliably, never drop". Two
+                    // more adjustments on top of the v6.2 cellular tuning:
+                    //
+                    //   • handshake 8s → 15s. On a genuinely weak link the very
+                    //     first TLS handshake through the tunnel routinely needs
+                    //     more than 8s (the local hop alone can eat 4-5s). An
+                    //     8s budget aborted the handshake and the user saw
+                    //     "connects then immediately fails" on a bad signal. A
+                    //     wide budget costs nothing when the link is good, because
+                    //     a healthy handshake still completes in well under a
+                    //     second — it only helps the weak case.
+                    //
+                    //   • connIdle 600s → 900s and uplinkOnly/downlinkOnly 12 → 20.
+                    //     A half-open direction is normal on a dozing radio; being
+                    //     patient here is what stops the "disconnects by itself"
+                    //     complaint.
+                    put("handshake", 15)
+                    put("connIdle", 900)
+                    put("uplinkOnly", 20)
+                    put("downlinkOnly", 20)
                     put("statsUserUplink", true)
                     put("statsUserDownlink", true)
                     // Larger per-connection buffer => higher throughput on big
                     // transfers (full bandwidth) and smoother streaming on a
-                    // bursty cellular link. 2 MiB is a strong, safe sweet-spot
-                    // without spiking RAM on weak phones.
-                    put("bufferSize", 2048)
+                    // bursty cellular link. v6.3 raises this to 4 MiB: on a weak
+                    // high-latency link the bandwidth-delay product is large, and
+                    // a 2 MiB window was the actual ceiling on download speed
+                    // ("very weak even when connected"). 4 MiB is still modest
+                    // for a modern phone.
+                    put("bufferSize", 4096)
                 })
             })
             put("system", JSONObject().apply {
@@ -425,13 +445,25 @@ object XrayConfigBuilder {
         // Fast Open + no-delay so the first byte after a dormancy resumes at full
         // speed. tcpMptcp stays OFF (MPTCP is poorly supported on Iranian carrier
         // middleboxes and caused spurious resets).
+        //
+        // v6.3 — WEAK-LINK / NEVER-DROP TUNING.
+        //   • keep-alive idle 60s → 45s with interval 15s and count 12. The v6.2
+        //     values (60/30/9) survive a carrier NAT with a ~5 min timeout, but
+        //     several Iranian mobile NATs reap at ~90s. Probing a little sooner
+        //     and more often keeps the mapping warm, and 12 probes means the
+        //     tunnel survives ~3 minutes of total radio blackout (a tunnel that
+        //     comes back beats one that has to be re-dialled).
+        //   • tcpUserTimeout is set generously so the kernel does not abort a
+        //     socket that is merely slow — the exact failure mode on weak signal.
         stream.put("sockopt", JSONObject().apply {
-            put("tcpKeepAliveIdle", 60)
-            put("tcpKeepAliveInterval", 30)
-            put("tcpKeepAliveCount", 9)
+            put("tcpKeepAliveIdle", 45)
+            put("tcpKeepAliveInterval", 15)
+            put("tcpKeepAliveCount", 12)
             put("tcpNoDelay", true)
             put("tcpMptcp", false)
             put("mark", 0)
+            // Give a slow-but-alive socket 100s before the kernel kills it.
+            put("tcpUserTimeout", 100_000)
             if (sec == "tls" || sec == "reality") {
                 put("tcpFastOpen", true)
                 put("fragment", JSONObject().apply {

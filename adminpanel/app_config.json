@@ -1,6 +1,6 @@
 {
-  "version": 18,
-  "latestApkVersion": "6.2",
+  "version": 19,
+  "latestApkVersion": "6.3",
   "appLogo": {
     "url": ""
   },
@@ -39,8 +39,8 @@
     "note": "حمایت شما سرورها را پایدار و پرسرعت نگه می‌دارد",
     "items": []
   },
-  "ts": 1784786827754,
-  "lastUpdatedAt": 1784786827754,
+  "ts": 1784960968761,
+  "lastUpdatedAt": 1784960968761,
   "inAppTelegram": {
     "url": "https://t.me/Professor_ch"
   },
@@ -53,5 +53,57 @@
     "imageUrl": "https://raw.githubusercontent.com/aptixzero/PRF_VPN/main/adminpanel/media/banner_1783146541004.png?v=1783146544198",
     "action": "url",
     "actionUrl": "https://t.me/Professor_ch"
+  },
+  "downloadLinks": {
+    "enabled": true,
+    "heading": "لینک‌های دانلود",
+    "note": "برای دریافت آخرین نسخه Professor VPN از لینک‌های زیر استفاده کنید.",
+    "items": [
+      {
+        "id": "dl_0",
+        "title": "دانلود مستقیم APK (نسخه ۶.۳)",
+        "url": "https://github.com/aptixzero/my_prFF_vP_N/releases/latest",
+        "note": "نسخه یونیورسال – مناسب همه دستگاه‌ها"
+      },
+      {
+        "id": "dl_1",
+        "title": "کانال تلگرام",
+        "url": "https://t.me/Professor_ch",
+        "note": "آخرین اخبار و نسخه‌ها"
+      }
+    ]
+  },
+  "downloads": {
+    "enabled": true,
+    "heading": "لینک‌های دانلود",
+    "note": "برای دریافت آخرین نسخه Professor VPN از لینک‌های زیر استفاده کنید.",
+    "items": [
+      {
+        "id": "dl_0",
+        "title": "دانلود مستقیم APK (نسخه ۶.۳)",
+        "url": "https://github.com/aptixzero/my_prFF_vP_N/releases/latest",
+        "note": "نسخه یونیورسال – مناسب همه دستگاه‌ها"
+      },
+      {
+        "id": "dl_1",
+        "title": "کانال تلگرام",
+        "url": "https://t.me/Professor_ch",
+        "note": "آخرین اخبار و نسخه‌ها"
+      }
+    ]
+  },
+  "notice": {
+    "enabled": false,
+    "title": "اعلان Professor Vpn",
+    "text": "",
+    "id": "",
+    "color": "#8A3FFC"
+  },
+  "notification": {
+    "enabled": false,
+    "title": "اعلان Professor Vpn",
+    "text": "",
+    "id": "",
+    "color": "#8A3FFC"
   }
 }

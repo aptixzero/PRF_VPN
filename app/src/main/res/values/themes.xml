@@ -25,6 +25,20 @@
         <item name="appAccentRed">@color/neon_red</item>
         <item name="appStroke">@color/stroke</item>
         <item name="appBgDrawable">@drawable/bg_app</item>
+        <!-- v6.3 light-theme fix: dark values are the ORIGINAL constants, so
+             the dark look is unchanged. -->
+        <item name="appAccentViolet">@color/violet_bright</item>
+        <item name="appAccentBlue">@color/neon_blue</item>
+        <item name="appAccentPurple">@color/neon_purple</item>
+        <item name="appChipTopColor">#FF0C0C12</item>
+        <item name="appChipBottomColor">#FF070709</item>
+        <item name="appSurfaceColor">#FF0B0816</item>
+        <item name="appTabBarColor">#FF060608</item>
+        <item name="appHairline">@color/hairline</item>
+        <item name="appCardBorder">@color/card_border</item>
+        <item name="appCardBorderLite">@color/card_border_lite</item>
+        <item name="appTagFill">#1F8A3FFC</item>
+        <item name="appTagStroke">#558A3FFC</item>
     </style>
 
     <!-- LIGHT theme — same neon brand accents, light surfaces. -->
@@ -45,14 +59,30 @@
         <item name="appBgColor">@color/lbg_deep</item>
         <item name="appPanelColor">@color/lbg_panel</item>
         <item name="appCardColor">@color/lbg_card</item>
-        <item name="appCardActiveColor">#FFE2F7E9</item>
+        <item name="appCardActiveColor">@color/lbg_card_active</item>
         <item name="appTextPrimary">@color/ltext_primary</item>
         <item name="appTextSecondary">@color/ltext_secondary</item>
         <item name="appTextDim">@color/ltext_dim</item>
         <item name="appAccentGreen">@color/lneon_green</item>
         <item name="appAccentRed">@color/lneon_red</item>
-        <item name="appStroke">#FFCAD9CF</item>
+        <item name="appStroke">@color/lstroke</item>
         <item name="appBgDrawable">@drawable/bg_app_light</item>
+        <!-- v6.3 light-theme fix: matched light equivalents. Surfaces become
+             white/near-white, hairlines become soft grey-violet, and the violet
+             accents are darkened so small 8-9sp labels stay readable on white
+             (the pale #FFB983FF simply vanished against a white card). -->
+        <item name="appAccentViolet">@color/lviolet_accent</item>
+        <item name="appAccentBlue">@color/lneon_blue</item>
+        <item name="appAccentPurple">@color/lneon_purple</item>
+        <item name="appChipTopColor">@color/lbg_card</item>
+        <item name="appChipBottomColor">@color/lbg_chip</item>
+        <item name="appSurfaceColor">@color/lbg_card</item>
+        <item name="appTabBarColor">@color/lbg_panel</item>
+        <item name="appHairline">@color/lhairline</item>
+        <item name="appCardBorder">@color/lcard_border</item>
+        <item name="appCardBorderLite">@color/lcard_border_lite</item>
+        <item name="appTagFill">#147C3AED</item>
+        <item name="appTagStroke">#447C3AED</item>
     </style>
 
     <!-- Splash uses the dark base regardless (brand boot screen). -->
@@ -70,6 +100,11 @@
     </style>
 
     <style name="Theme.ProfessorVPN.Dialog.Light" parent="ThemeOverlay.MaterialComponents.MaterialAlertDialog">
+        <!-- v6.3 — the light dialog previously inherited the platform default
+             surface while the app painted dark text on it inconsistently. It now
+             uses the same theme-aware dialog_bg as the dark theme, which resolves
+             to a white card with a soft violet rim. -->
+        <item name="android:windowBackground">@drawable/dialog_bg</item>
         <item name="colorPrimary">@color/lneon_green</item>
         <item name="colorAccent">@color/lneon_green</item>
         <item name="android:textColorPrimary">@color/ltext_primary</item>

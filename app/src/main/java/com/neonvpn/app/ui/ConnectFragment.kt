@@ -75,6 +75,19 @@ class ConnectFragment : Fragment() {
     private lateinit var pingValue: TextView
     private lateinit var uptimeValue: TextView
 
+    // v6.3 — the small square behind the server name now holds the COUNTRY FLAG
+    // of whatever server we are connected to. Rendered as a Unicode regional-
+    // indicator emoji so there is no image download and therefore no lag/freeze.
+    private var flagText: TextView? = null
+    /** The host whose flag is currently being resolved (dedupes async callbacks). */
+    @Volatile private var flagHost: String = ""
+
+    // v6.3 — in-app announcement card ("اعلان Professor Vpn").
+    private var noticeCard: View? = null
+    private var noticeTitle: TextView? = null
+    private var noticeText: TextView? = null
+    private var noticeAccent: View? = null
+
     // §4.5 — a SINGLE state-machine coroutine consumes toggle intents through a
     // CONFLATED channel (latest-tap-wins) guarded by a Mutex.
     private val toggleChannel = Channel<Unit>(Channel.CONFLATED)
@@ -89,6 +102,7 @@ class ConnectFragment : Fragment() {
             bindLogo(cfg.appLogoUrl)
             telegramUrl = cfg.homeTelegramUrl
             bindCta(cfg)
+            bindNotice(cfg)
         }
     }
 
@@ -139,6 +153,15 @@ class ConnectFragment : Fragment() {
         pingValue = view.findViewById(R.id.ping_value)
         uptimeValue = view.findViewById(R.id.uptime_value)
 
+        flagText = view.findViewById(R.id.flag_text)
+
+        noticeCard = view.findViewById(R.id.notice_card)
+        noticeTitle = view.findViewById(R.id.notice_title)
+        noticeText = view.findViewById(R.id.notice_text)
+        noticeAccent = view.findViewById(R.id.notice_accent)
+        view.findViewById<View?>(R.id.notice_close)?.setOnClickListener { dismissNotice() }
+        bindNotice(RemoteConfigStore.current())
+
         // §4.2 — Telegram icon opens the admin-configured "In-App Telegram Link".
         telegramUrl = RemoteConfigStore.cachedTelegramUrl(requireContext())
         telegramIcon?.setOnClickListener { openTelegram() }
@@ -150,15 +173,16 @@ class ConnectFragment : Fragment() {
         // the pill is the action button (matches the UI sheet).
         connectPill.setOnClickListener { animatePillPress(); onTap() }
 
-        // Quick-action buttons navigate / hint (functional but lightweight).
+        // The server card still navigates to My Configs.
         view.findViewById<View?>(R.id.server_selector)?.setOnClickListener {
             (activity as? MainActivity)?.showConfigsTab()
         }
+        // v6.3 — the quick-action row is now DISPLAY-ONLY except Settings.
+        // auto connect / kill switch / protocol are indicators, not buttons, so
+        // no click listener is attached to them (and the layout marks them
+        // non-clickable + non-focusable so they never show a ripple).
         view.findViewById<View?>(R.id.qa_settings)?.setOnClickListener {
             (activity as? MainActivity)?.openSettings()
-        }
-        view.findViewById<View?>(R.id.qa_protocol)?.setOnClickListener {
-            (activity as? MainActivity)?.showConfigsTab()
         }
 
         // v4.6 — Telegram-channel CTA button under the connect pill.
@@ -182,6 +206,46 @@ class ConnectFragment : Fragment() {
                     .setInterpolator(OvershootInterpolator(2.2f))
                     .setDuration(220)
                     .start()
+            }
+            .start()
+    }
+
+    /**
+     * v6.3 — smoother state changes on the pill and the status line.
+     *
+     * The old code swapped the pill background and the status text INSTANTLY, so
+     * every transition (idle → connecting → connected) was a hard flicker that
+     * made the whole screen feel cheap next to the animated globe. We now
+     * cross-fade the pill whenever its background actually changes, and give the
+     * status text a short fade so the words don't just pop.
+     */
+    private var pillBgRes: Int = 0
+
+    private fun setPillBackground(res: Int) {
+        if (pillBgRes == res) return
+        pillBgRes = res
+        connectPill.animate().cancel()
+        connectPill.animate()
+            .alpha(0.55f)
+            .setDuration(110)
+            .withEndAction {
+                connectPill.setBackgroundResource(res)
+                connectPill.animate().alpha(1f).setDuration(170).start()
+            }
+            .start()
+    }
+
+    /** Fade the status label when its text changes (no fade on a repeat). */
+    private fun setStatus(text: String, color: Int) {
+        statusText.setTextColor(color)
+        if (statusText.text?.toString() == text) return
+        statusText.animate().cancel()
+        statusText.animate()
+            .alpha(0f)
+            .setDuration(90)
+            .withEndAction {
+                statusText.text = text
+                statusText.animate().alpha(1f).setDuration(150).start()
             }
             .start()
     }
@@ -301,11 +365,36 @@ class ConnectFragment : Fragment() {
         }
     }
 
+    /**
+     * v6.3 — STOP BUTTON RELIABILITY (UI half).
+     *
+     * `startService()` can throw on Android 8+ if the process happens to be in
+     * the background at that exact instant, and the old code let that exception
+     * escape — the tap then did nothing at all and the pill stayed on
+     * "Disconnect". Now:
+     *
+     *   • the intent is delivered defensively (foreground-service variant as a
+     *     fallback), so the STOP command always reaches the service;
+     *   • the UI is repainted to DISCONNECTED unconditionally, so even in the
+     *     worst case the button visibly responds to the very first tap instead
+     *     of appearing frozen;
+     *   • the shared state bus is corrected too, so another tab can't restore a
+     *     stale "Connected".
+     */
     private fun stopVpn() {
-        val intent = Intent(requireContext(), NeonVpnService::class.java).apply {
+        val ctx = context ?: return
+        val intent = Intent(ctx, NeonVpnService::class.java).apply {
             action = NeonVpnService.ACTION_STOP
         }
-        requireContext().startService(intent)
+        val delivered = runCatching { ctx.startService(intent); true }.getOrDefault(false)
+        if (!delivered && Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            // Background-start restriction: the FGS variant is still allowed for
+            // a service that is already running in the foreground.
+            runCatching { ctx.startForegroundService(intent) }
+        }
+        // Always reflect the user's intent right away.
+        VpnStateBus.state = NeonVpnService.STATE_DISCONNECTED
+        VpnStateBus.info = ""
         render(NeonVpnService.STATE_DISCONNECTED, "")
     }
 
@@ -313,39 +402,40 @@ class ConnectFragment : Fragment() {
         val selected = store.getSelected()
         serverText.text = selected?.remark ?: getString(R.string.no_config)
         updateProtoTabs(selected?.protocol)
+        // v6.3 — the flag square only ever shows something while CONNECTED.
+        renderFlag(state, selected?.address, selected?.remark)
 
         when (state) {
             NeonVpnService.STATE_CONNECTED -> {
-                statusText.text = getString(R.string.connected)
-                statusText.setTextColor(themeColor(R.attr.appAccentGreen))
+                setStatus(getString(R.string.connected), themeColor(R.attr.appAccentGreen))
                 globe.setState(GlobeConnectView.State.CONNECTED)
                 connectLabel.text = getString(R.string.tap_to_disconnect)
-                connectPill.setBackgroundResource(R.drawable.connect_pill_connected)
+                setPillBackground(R.drawable.connect_pill_connected)
                 statConnection?.text = getString(R.string.connected)
             }
             NeonVpnService.STATE_CONNECTING -> {
-                statusText.text = getString(R.string.connecting)
-                statusText.setTextColor(0xFFFFB020.toInt())
+                setStatus(getString(R.string.connecting), 0xFFFFB020.toInt())
                 globe.setState(GlobeConnectView.State.CONNECTING)
                 connectLabel.text = getString(R.string.connecting)
-                connectPill.setBackgroundResource(R.drawable.connect_pill_connecting)
+                setPillBackground(R.drawable.connect_pill_connecting)
                 statConnection?.text = getString(R.string.connecting)
             }
             NeonVpnService.STATE_ERROR -> {
-                statusText.text = if (info.isNotBlank()) "ERROR · $info" else getString(R.string.error)
-                statusText.setTextColor(themeColor(R.attr.appAccentRed))
+                setStatus(
+                    if (info.isNotBlank()) "ERROR · $info" else getString(R.string.error),
+                    themeColor(R.attr.appAccentRed)
+                )
                 globe.setState(GlobeConnectView.State.ERROR)
                 connectLabel.text = getString(R.string.tap_to_connect)
-                connectPill.setBackgroundResource(R.drawable.connect_pill_idle)
+                setPillBackground(R.drawable.connect_pill_idle)
                 statConnection?.text = getString(R.string.error)
                 resetStats()
             }
             else -> {
-                statusText.text = getString(R.string.disconnected)
-                statusText.setTextColor(themeColor(R.attr.appTextSecondary))
+                setStatus(getString(R.string.disconnected), themeColor(R.attr.appTextSecondary))
                 globe.setState(GlobeConnectView.State.IDLE)
                 connectLabel.text = getString(R.string.tap_to_connect)
-                connectPill.setBackgroundResource(R.drawable.connect_pill_idle)
+                setPillBackground(R.drawable.connect_pill_idle)
                 statConnection?.text = getString(R.string.disconnected)
                 resetStats()
             }
@@ -354,6 +444,84 @@ class ConnectFragment : Fragment() {
 
     /** v4.6 — the protocol segmented tags were removed; this is now a no-op. */
     private fun updateProtoTabs(protocol: String?) { /* removed in v4.6 */ }
+
+    // ------------------------------------------------------------------
+    // v6.3 — COUNTRY FLAG on the Home server tile
+    // ------------------------------------------------------------------
+
+    /**
+     * Paint the small square behind the server name.
+     *
+     * Rules from the brief:
+     *  • default (not connected) → EMPTY square,
+     *  • connected → the flag of the country the server sits in,
+     *  • must work for ANY country IP,
+     *  • must never lag or freeze the UI.
+     *
+     * To guarantee "no lag" we do the paint in two phases: an instantaneous,
+     * zero-I/O cache read on the main thread, and — only if that misses — a
+     * fire-and-forget background lookup whose result is applied later. The UI
+     * thread therefore never blocks on DNS or HTTP.
+     */
+    private fun renderFlag(state: String, host: String?, remark: String?) {
+        val tv = flagText ?: return
+        val connected = state == NeonVpnService.STATE_CONNECTED
+        if (!connected || host.isNullOrBlank()) {
+            flagHost = ""
+            tv.text = ""
+            return
+        }
+        flagHost = host
+        val ctx = context ?: return
+        // Phase 1 — instant (memory/disk cache + offline text heuristics).
+        tv.text = com.neonvpn.app.util.CountryFlags.cachedFlagFor(ctx, host, remark ?: "")
+        // Phase 2 — background resolve when we still don't know the country.
+        if (tv.text.isNullOrEmpty()) {
+            com.neonvpn.app.util.CountryFlags.resolveAsync(
+                ctx.applicationContext, host, remark ?: ""
+            ) { flag ->
+                val v = flagText ?: return@resolveAsync
+                // Ignore stale callbacks (user switched server meanwhile).
+                if (flagHost != host) return@resolveAsync
+                if (VpnStateBus.state != NeonVpnService.STATE_CONNECTED) return@resolveAsync
+                v.post { if (isAdded && flagHost == host) v.text = flag }
+            }
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // v6.3 — in-app announcement ("اعلان Professor Vpn")
+    // ------------------------------------------------------------------
+
+    /**
+     * Show the operator's announcement. Per the brief the card NEVER says the
+     * message came from an admin panel — it is titled "اعلان Professor Vpn"
+     * followed by the message body verbatim.
+     */
+    private fun bindNotice(cfg: RemoteConfig) {
+        val card = noticeCard ?: return
+        val n = cfg.notice
+        val ctx = context ?: return
+        if (!n.hasContent || com.neonvpn.app.util.AppPrefs.isNoticeDismissed(ctx, n.id)) {
+            card.visibility = View.GONE
+            return
+        }
+        noticeTitle?.text = n.title.ifBlank { com.neonvpn.app.config.NoticeConfig.DEFAULT_TITLE }
+        noticeText?.text = n.text
+        val accent = try { android.graphics.Color.parseColor(n.color) } catch (_: Throwable) { 0 }
+        if (accent != 0) {
+            noticeAccent?.setBackgroundColor(accent)
+            noticeTitle?.setTextColor(accent)
+        }
+        card.visibility = View.VISIBLE
+    }
+
+    /** Remember this announcement id so it is not forced on the user again. */
+    private fun dismissNotice() {
+        val ctx = context ?: return
+        com.neonvpn.app.util.AppPrefs.dismissNotice(ctx, RemoteConfigStore.current().notice.id)
+        noticeCard?.visibility = View.GONE
+    }
 
     /** Bind the Home CTA button (label per-language + admin url). */
     private fun bindCta(cfg: RemoteConfig) {
