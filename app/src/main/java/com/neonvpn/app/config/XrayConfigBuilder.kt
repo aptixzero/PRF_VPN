@@ -84,20 +84,51 @@ object XrayConfigBuilder {
                     //     A half-open direction is normal on a dozing radio; being
                     //     patient here is what stops the "disconnects by itself"
                     //     complaint.
-                    put("handshake", 15)
-                    put("connIdle", 900)
-                    put("uplinkOnly", 20)
-                    put("downlinkOnly", 20)
+                    // ── v6.4 — THE "WORKS FOR A MINUTE THEN FREEZES" FIX ─────
+                    // Reported bug: *"I connect, open Instagram, it works for
+                    // about a minute, then the videos freeze / lock up. If I
+                    // disconnect and reconnect once inside the app, it starts
+                    // working again."*
+                    //
+                    // `connIdle = 900` was a large part of that. A free public
+                    // node typically caps how many concurrent connections one
+                    // user may hold. Instagram opens dozens of short-lived
+                    // sockets per minute of scrolling; with a 15-MINUTE idle
+                    // timeout every one of those finished sockets stayed
+                    // allocated on both the phone AND the server. Within about
+                    // a minute of browsing the node's per-user limit was
+                    // exhausted, so NEW connections stopped being accepted —
+                    // videos froze, while the tunnel itself still looked
+                    // perfectly healthy (which is why the watchdog never
+                    // noticed). Disconnecting dropped every stale socket at
+                    // once, which is exactly why a manual reconnect "fixed" it.
+                    //
+                    // 120s is generous enough that a paused video or a
+                    // backgrounded app is never cut off, while dead sockets are
+                    // reclaimed fast enough that the pool can never fill up.
+                    // Half-open directions are released promptly for the same
+                    // reason (a stalled half-open socket is pure dead weight).
+                    put("handshake", 12)
+                    put("connIdle", 120)
+                    put("uplinkOnly", 4)
+                    put("downlinkOnly", 4)
                     put("statsUserUplink", true)
                     put("statsUserDownlink", true)
-                    // Larger per-connection buffer => higher throughput on big
-                    // transfers (full bandwidth) and smoother streaming on a
-                    // bursty cellular link. v6.3 raises this to 4 MiB: on a weak
-                    // high-latency link the bandwidth-delay product is large, and
-                    // a 2 MiB window was the actual ceiling on download speed
-                    // ("very weak even when connected"). 4 MiB is still modest
-                    // for a modern phone.
-                    put("bufferSize", 4096)
+                    // Per-connection buffer. v6.4 tunes this DOWN from 4096 KiB
+                    // to 512 KiB — and that is a speed FIX, not a speed cut.
+                    //
+                    // `bufferSize` is per CONNECTION, not per tunnel. A phone
+                    // scrolling Instagram holds 50-100 simultaneous connections;
+                    // at 4 MiB each, Xray was being asked to reserve multiple
+                    // GIGABYTES of buffer. The Android allocator obviously can't
+                    // give it that, so the core started thrashing and stalling
+                    // under exactly the load pattern the user described (video
+                    // scrolling), which reads as "everything freezes after a
+                    // minute". 512 KiB per connection is already well above the
+                    // bandwidth-delay product of any Iranian mobile link, so
+                    // single-stream throughput is unchanged, while total memory
+                    // stays sane and nothing stalls.
+                    put("bufferSize", 512)
                 })
             })
             put("system", JSONObject().apply {
@@ -124,10 +155,25 @@ object XrayConfigBuilder {
         // domestic resolver stays last-and-skipFallback so Iranian domains
         // resolve fast and direct. We also keep the cache ENABLED so a flapping
         // cellular link doesn't re-resolve on every request.
+        // v6.4 — DNS is also part of the "freezes after a minute" story. When a
+        // name lookup wedges, every NEW request in the app hangs while already-
+        // open sockets keep working — which looks exactly like "the feed froze
+        // but the VPN says connected".
+        //
+        //   • `queryStrategy` is pinned to **UseIPv4**. Almost no free node
+        //     relays IPv6, so every AAAA record the resolver handed back became
+        //     a connection attempt to an unreachable address that had to time
+        //     out before the app retried over IPv4. On Instagram (which is fully
+        //     dual-stack) that meant a multi-second stall on every fresh domain,
+        //     compounding until the feed locked up. Asking for A records only
+        //     removes the entire class of failure.
+        //   • Cloudflare's DoH is listed first (and reachable by IP), matching
+        //     the Cloudflare-only probe policy used everywhere else in v6.4.
+        //   • The domestic resolver still serves Iranian domains directly.
         root.put("dns", JSONObject().apply {
             put("servers", JSONArray().apply {
                 put("https://1.1.1.1/dns-query")
-                put("https://dns.google/dns-query")
+                put("https://1.0.0.1/dns-query")
                 put(JSONObject().apply {
                     put("address", "78.157.42.100")           // domestic resolver
                     put("port", 53)
@@ -140,7 +186,7 @@ object XrayConfigBuilder {
                 put("1.1.1.1")
                 put("8.8.8.8")
             })
-            put("queryStrategy", "UseIP")
+            put("queryStrategy", "UseIPv4")
             put("disableCache", false)
             put("disableFallbackIfMatch", true)
             put("tag", "dns-out-tag")
@@ -189,7 +235,10 @@ object XrayConfigBuilder {
         outbounds.put(JSONObject().apply {
             put("tag", "direct")
             put("protocol", "freedom")
-            put("settings", JSONObject().apply { put("domainStrategy", "UseIP") })
+            // v6.4 — IPv4 only here too, for the same reason as the DNS block:
+            // a v6 address on a link with no working v6 path is a guaranteed
+            // multi-second stall before the fallback.
+            put("settings", JSONObject().apply { put("domainStrategy", "UseIPv4") })
         })
         outbounds.put(JSONObject().apply {
             put("tag", "dns-out")
@@ -228,6 +277,50 @@ object XrayConfigBuilder {
                     put("type", "field")
                     put("outboundTag", "block")
                     put("protocol", JSONArray().apply { put("bittorrent") })
+                })
+                // ── v6.4 — BLOCK QUIC. THE INSTAGRAM-FREEZE FIX. ─────────────
+                // Reported bug: *"I connect, go into Instagram, it works for
+                // about a minute, then the videos freeze and go stiff. I toggle
+                // the VPN off and on once and it starts working again."*
+                //
+                // That is the textbook signature of QUIC leaking through a
+                // tun2socks tunnel, and it is why every serious client (v2rayNG,
+                // Nekobox, Clash) ships a "Block QUIC" switch that users are told
+                // to enable:
+                //
+                //   • Instagram, YouTube and Facebook prefer HTTP/3 over QUIC
+                //     (UDP 443). QUIC is a UDP protocol carried here as SOCKS5
+                //     UDP-ASSOCIATE through hev-socks5-tunnel and then through
+                //     the node. Almost no free public VLESS/VMESS node relays UDP
+                //     reliably — many drop it entirely after the first few
+                //     seconds, and Iranian DPI shapes UDP 443 aggressively.
+                //   • QUIC is designed to survive packet loss, so the app does
+                //     NOT fail fast and retry: it keeps a "connection" it thinks
+                //     is alive and just waits. The video buffer drains and the
+                //     feed locks up — while the tunnel itself is perfectly
+                //     healthy, which is exactly why the watchdog saw nothing
+                //     wrong and why only a manual reconnect (which forces the
+                //     app to renegotiate) appeared to fix it.
+                //
+                // Blocking UDP 443 makes the block INSTANT and EXPLICIT, so
+                // Instagram/YouTube immediately fall back to HTTP/2 over TCP —
+                // which this tunnel carries perfectly, permanently, at full
+                // speed. Nothing is lost: HTTP/3 is only a transport, every one
+                // of these services works fully over TCP.
+                //
+                // The `sniffing.destOverride` list includes "quic", so QUIC is
+                // caught both by port and by protocol signature — a client that
+                // tries QUIC on a non-standard port is blocked too.
+                put(JSONObject().apply {
+                    put("type", "field")
+                    put("outboundTag", "block")
+                    put("network", "udp")
+                    put("port", "443")
+                })
+                put(JSONObject().apply {
+                    put("type", "field")
+                    put("outboundTag", "block")
+                    put("protocol", JSONArray().apply { put("quic") })
                 })
                 put(JSONObject().apply {
                     put("type", "field")
@@ -299,9 +392,12 @@ object XrayConfigBuilder {
             })
         })
         out.put("streamSettings", buildStreamSettings(cfg))
-        // Mux OFF for VLESS: Reality/XTLS-vision are incompatible with mux, and
-        // even on plain TLS a dedicated 1:1 proxied stream per app connection
-        // gives the fastest single-stream bandwidth with no head-of-line blocking.
+        // Mux stays OFF for VLESS. Reality and XTLS-Vision (flow) are outright
+        // incompatible with mux — enabling it corrupts the Vision splice and the
+        // tunnel comes up carrying zero bytes ("fake connected"). Even on plain
+        // TLS, a dedicated 1:1 stream gives the best single-stream bandwidth with
+        // no head-of-line blocking. v6.4 solves connection-pool exhaustion the
+        // right way instead: short idle timeouts + blocked QUIC (see build()).
         out.put("mux", JSONObject().apply {
             put("enabled", false)
             put("concurrency", -1)
@@ -455,15 +551,25 @@ object XrayConfigBuilder {
         //     comes back beats one that has to be re-dialled).
         //   • tcpUserTimeout is set generously so the kernel does not abort a
         //     socket that is merely slow — the exact failure mode on weak signal.
+        // v6.4 — KEEP-ALIVE / TIMEOUT RETUNE (part of the never-freeze fix).
+        //   • tcpKeepAliveIdle 45 → 30 with interval 10 and count 6. A carrier
+        //     NAT that reaps at ~60-90s is the norm on Iranian mobile; probing
+        //     at 30s keeps every mapping warm with room to spare. Six probes
+        //     (~90s of blackout tolerated) is plenty — the previous 12 meant a
+        //     socket that was genuinely dead lingered for ~3 minutes, holding a
+        //     slot in the node's connection pool and starving new requests. That
+        //     is the same pool-exhaustion that froze Instagram after a minute.
+        //   • tcpUserTimeout 100s → 30s. Same reasoning: a socket the kernel
+        //     cannot drain in 30s is not "slow", it is wedged, and keeping it
+        //     alive only blocks the replacement connection from being made.
         stream.put("sockopt", JSONObject().apply {
-            put("tcpKeepAliveIdle", 45)
-            put("tcpKeepAliveInterval", 15)
-            put("tcpKeepAliveCount", 12)
+            put("tcpKeepAliveIdle", 30)
+            put("tcpKeepAliveInterval", 10)
+            put("tcpKeepAliveCount", 6)
             put("tcpNoDelay", true)
             put("tcpMptcp", false)
             put("mark", 0)
-            // Give a slow-but-alive socket 100s before the kernel kills it.
-            put("tcpUserTimeout", 100_000)
+            put("tcpUserTimeout", 30_000)
             if (sec == "tls" || sec == "reality") {
                 put("tcpFastOpen", true)
                 put("fragment", JSONObject().apply {

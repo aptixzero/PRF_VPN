@@ -233,6 +233,8 @@ class NeonVpnService : VpnService() {
             updateNotification(server.remark, "Connected · ${health}ms")
             startStatsPump()
             startWatchdog()
+            // v6.4 — learn the REAL egress IP + country through the live tunnel.
+            resolveExitIdentityAsync(server)
             Log.i(TAG, "VPN connected via ${server.protocol} ${server.address}:${server.port}")
         } catch (e: Throwable) {
             Log.e(TAG, "startVpn error: ${e.message}", e)
@@ -260,12 +262,21 @@ class NeonVpnService : VpnService() {
         } catch (_: Exception) {
         }
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP_MR1) {
-            try {
-                builder.addAddress(PRIVATE_VLAN6_CLIENT, 126)
-                builder.addRoute("::", 0)
-            } catch (_: Exception) {
-            }
+        // ── v6.4 — DO NOT ROUTE IPv6 INTO THE TUN ─────────────────────────────
+        // v6.3 captured `::/0` as well. That was actively harmful: the Xray
+        // config now resolves IPv4-only (`queryStrategy: UseIPv4`) and virtually
+        // no free public node relays IPv6 at all, so every v6 packet an app sent
+        // was swallowed by the TUN and silently dropped. Dual-stack apps like
+        // Instagram try IPv6 FIRST (Happy Eyeballs), so each new connection paid
+        // a timeout before falling back — the stalls that pile up into "it works
+        // for a minute then freezes".
+        //
+        // By NOT adding a v6 address/route, the system reports no IPv6
+        // connectivity to apps while the VPN is up, so they go straight to IPv4
+        // and everything stays fast and responsive. On Android 10+ we can state
+        // this explicitly, which makes the fallback instant.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            try { builder.allowFamily(android.system.OsConstants.AF_INET) } catch (_: Exception) {}
         }
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
@@ -423,18 +434,92 @@ class NeonVpnService : VpnService() {
             appendLine("  address: 127.0.0.1")
             appendLine("  udp: 'udp'")
             appendLine("misc:")
-            // v4.5 — tuned for FULL bandwidth + rock-solid persistence:
-            //   • bigger per-task stack => the native tunnel can drive many
-            //     parallel high-throughput streams without stack pressure;
-            //   • a generous read-write-timeout (5 min) so a long idle download /
-            //     a screen-off pause / hours in another app never tears a live
-            //     connection down — it just resumes pulling at full speed;
+            // ── v6.4 — tun2socks side of the "freezes after a minute" fix ─────
+            //
+            //   • read-write-timeout 300000 → 60000. This was the single most
+            //     damaging value. hev holds one native session per TCP flow, and
+            //     a 5-MINUTE timeout meant every socket Instagram finished with
+            //     stayed parked for five more minutes. A minute of scrolling
+            //     easily opens a few hundred flows, so the session table filled
+            //     up and NEW flows could no longer be created — the feed froze
+            //     while the tunnel itself was still perfectly healthy. Toggling
+            //     the VPN flushed the whole table, which is exactly why a manual
+            //     reconnect always "fixed" it. 60s keeps long-poll / websocket /
+            //     download connections comfortably alive while reclaiming dead
+            //     ones fast enough that the table can never saturate.
+            //   • max-session-count caps the table explicitly, so even a
+            //     pathological app cannot exhaust it.
+            //   • limit-nofile raises the fd ceiling so a busy session
+            //     (many parallel media streams) never hits EMFILE.
+            //   • udp-read-write-timeout is short: QUIC is blocked upstream, so
+            //     the only UDP left is DNS-ish and should be reaped quickly.
             //   • a tight connect-timeout so a genuinely dead link fails fast and
             //     the watchdog can recover instead of hanging.
-            appendLine("  task-stack-size: 163840")
+            appendLine("  task-stack-size: 81920")
             appendLine("  connect-timeout: 5000")
-            appendLine("  read-write-timeout: 300000")
+            appendLine("  read-write-timeout: 60000")
+            appendLine("  udp-read-write-timeout: 20000")
+            appendLine("  max-session-count: 1024")
+            appendLine("  limit-nofile: 65535")
             appendLine("  log-level: warn")
+        }
+    }
+
+    // ------------------------------------------------- v6.4 exit identity
+    /**
+     * v6.4 — discover the tunnel's REAL exit IP and the country that IP belongs
+     * to, by fetching Cloudflare's `/cdn-cgi/trace` **through the live tunnel**.
+     *
+     * The brief asks that after connecting, the app shows the IP of the country
+     * it actually gave you. v6.3 guessed the country from the SERVER hostname,
+     * which is wrong surprisingly often — a node's entry address and its exit
+     * address frequently sit in different countries, and many nodes are fronted
+     * by a CDN whose address says nothing about the exit. The only correct
+     * answer is to ask the internet what it sees, which is precisely what the
+     * trace endpoint returns (`ip=…` and `loc=…`, ~200 bytes over Cloudflare —
+     * the same edge every probe in v6.4 uses).
+     *
+     * Runs on a detached daemon thread with retries: right after connect the
+     * tunnel may need a moment to settle, and on a weak link the first attempt
+     * can miss. It never blocks anything and never fails loudly — if it cannot
+     * resolve, the UI simply keeps the hostname-derived guess.
+     */
+    private fun resolveExitIdentityAsync(server: ServerConfig) {
+        thread(name = "exit-ip", isDaemon = true) {
+            var attempt = 0
+            while (running && !stopping && attempt < 4) {
+                attempt++
+                try { Thread.sleep(if (attempt == 1) 1200L else 4000L) } catch (_: InterruptedException) { return@thread }
+                if (!running || stopping) return@thread
+                val body = try { xray.fetchTraceThroughTunnel() } catch (_: Throwable) { null }
+                if (body.isNullOrBlank()) continue
+
+                var ip = ""
+                var loc = ""
+                for (line in body.lineSequence()) {
+                    when {
+                        line.startsWith("ip=") -> ip = line.substring(3).trim()
+                        line.startsWith("loc=") -> loc = line.substring(4).trim().uppercase()
+                    }
+                }
+                if (ip.isBlank() && loc.isBlank()) continue
+
+                // Cache the country against the server host so a reconnect to the
+                // same node paints the correct flag instantly, with zero I/O —
+                // this is what makes it work even when the internet is weak.
+                if (loc.length == 2) {
+                    runCatching {
+                        com.neonvpn.app.util.CountryFlags.rememberCode(this, server.address, loc)
+                    }
+                }
+                runCatching {
+                    com.neonvpn.app.ui.VpnStateBus.updateExit(
+                        com.neonvpn.app.ui.ExitIdentity(ip = ip, countryCode = loc)
+                    )
+                }
+                Log.i(TAG, "exit identity: ip=$ip loc=$loc")
+                return@thread
+            }
         }
     }
 
@@ -454,7 +539,7 @@ class NeonVpnService : VpnService() {
             // authoritative keep-alive decision lives in the watchdog, which uses
             // the heavier confirmed (two-endpoint) check.
             try {
-                val p0 = xray.measureDelay()
+                val p0 = xray.measureDelayStable()
                 if (p0 in 1..8000) lastPing = p0
             } catch (_: Throwable) {}
 
@@ -524,9 +609,16 @@ class NeonVpnService : VpnService() {
                     // average of the real measured round-trips; a single noisy sample
                     // only nudges the displayed value rather than replacing it, and a
                     // transient miss (-1) does NOT wipe the last good ping to a dash.
-                    if (tick % 5 == 0) {
+                    // v6.4 — the DISPLAYED ping is now measured exactly the way
+                    // the per-config list ping measures it (same Cloudflare
+                    // endpoint, cold sample dropped, median of the warm rest),
+                    // so "120 in the list" no longer becomes "1000 once
+                    // connected". Refreshed every ~8s rather than ~5s because
+                    // measureDelayStable takes several round-trips and we do not
+                    // want the probe itself competing with the user's traffic.
+                    if (tick % 8 == 0) {
                         try {
-                            val p = xray.measureDelay()
+                            val p = xray.measureDelayStable()
                             if (p in 1..8000) {
                                 lastPing = if (lastPing <= 0) p
                                     else ((lastPing * 2 + p) / 3)   // EMA, weight last
@@ -560,6 +652,9 @@ class NeonVpnService : VpnService() {
         watchdogThread = thread(name = "watchdog", isDaemon = true) {
             var consecutiveFailures = 0
             var reviveAttempts = 0
+            // v6.4 — end-to-end (device-path) stall detection counters.
+            var pathChecks = 0
+            var pathFailures = 0
             // v4.8 — LONGER grace period (20s). The old 8s grace meant the watchdog
             // started probing while a cold Reality/XTLS tunnel was still stabilising
             // on Iran's disrupted links; a couple of early misses then triggered a
@@ -624,7 +719,59 @@ class NeonVpnService : VpnService() {
                         }
                     }
 
-                    val healthy = coreAlive && health in 1..8000
+                    var healthy = coreAlive && health in 1..8000
+
+                    // ── v6.4 — THE END-TO-END STALL DETECTOR ─────────────────
+                    // The bug this exists for: *"it works for a minute, then
+                    // Instagram freezes; I toggle the VPN once and it works
+                    // again."*
+                    //
+                    // Every check above only proves the CORE can still dial out.
+                    // In the freeze scenario it always could — the core was fine
+                    // and the outbound was fine. What had actually broken was the
+                    // full device path: TUN → tun2socks → SOCKS5 inbound → core.
+                    // hev's session table had filled with parked sockets, so new
+                    // flows could no longer be created. `measureDelay` bypasses
+                    // that entire path (it dials straight from the core), which
+                    // is exactly why the watchdog never noticed and why only a
+                    // manual reconnect helped.
+                    //
+                    // So we now periodically push a REAL request through the
+                    // SOCKS5 inbound — the same socket tun2socks feeds — which is
+                    // the identical path a user's app takes. If the core is
+                    // healthy but that path is dead, the tunnel is silently
+                    // frozen: we rebuild the tun2socks bridge in place, which
+                    // flushes the stale session table and restores traffic
+                    // WITHOUT the user ever touching the connect button. That is
+                    // the "toggle off and on" the user was doing by hand, done
+                    // automatically in about a second.
+                    if (healthy) {
+                        pathChecks++
+                        if (pathChecks % PATH_CHECK_EVERY == 0) {
+                            if (!probeDevicePath()) {
+                                pathFailures++
+                                Log.w(TAG, "watchdog: core healthy but DEVICE PATH dead " +
+                                    "(#$pathFailures) — tunnel is silently frozen")
+                                if (pathFailures >= 2) {
+                                    pathFailures = 0
+                                    healthy = false
+                                    restartTun2Socks()
+                                    // Give the rebuilt bridge a moment, then
+                                    // re-verify before doing anything drastic.
+                                    try { Thread.sleep(1200) } catch (_: InterruptedException) { break }
+                                    if (probeDevicePath()) {
+                                        Log.i(TAG, "watchdog: device path restored by tun2socks restart")
+                                        consecutiveFailures = 0
+                                        reviveAttempts = 0
+                                        continue
+                                    }
+                                }
+                            } else {
+                                pathFailures = 0
+                            }
+                        }
+                    }
+
                     if (healthy) {
                         consecutiveFailures = 0
                         reviveAttempts = 0
@@ -681,6 +828,73 @@ class NeonVpnService : VpnService() {
                     Log.w(TAG, "watchdog: ${e.message}")
                 }
             }
+        }
+    }
+
+    // ─────────────────────────── v6.4 device-path probe + self-heal ──────────
+
+    /**
+     * v6.4 — prove the FULL device path still carries traffic.
+     *
+     * Sends a real HTTP request through the **local SOCKS5 inbound** — the exact
+     * socket `tun2socks` feeds every app's packets into. This is deliberately
+     * different from [XrayManager.measureDelay], which dials straight out of the
+     * core and therefore cannot see a wedged tun2socks session table.
+     *
+     * Cloudflare's zero-byte 204 is the target (same endpoint policy as every
+     * other probe in v6.4), so the check costs almost nothing and never competes
+     * with the user's bandwidth.
+     *
+     * @return true when real bytes came back through the device path.
+     */
+    private fun probeDevicePath(): Boolean {
+        return try {
+            val proxy = java.net.Proxy(
+                java.net.Proxy.Type.SOCKS,
+                java.net.InetSocketAddress("127.0.0.1", XrayConfigBuilder.SOCKS_PORT)
+            )
+            val conn = (java.net.URL(com.neonvpn.app.config.ProbeEndpoints.PRIMARY)
+                .openConnection(proxy) as java.net.HttpURLConnection).apply {
+                connectTimeout = 6000
+                readTimeout = 6000
+                requestMethod = "GET"
+                useCaches = false
+                setRequestProperty("User-Agent", "ProfessorVPN/6.4 (Android)")
+                setRequestProperty("Connection", "close")
+            }
+            try {
+                val code = conn.responseCode
+                // 204 (or any 2xx/3xx) means the whole chain answered.
+                code in 200..399
+            } finally {
+                runCatching { conn.disconnect() }
+            }
+        } catch (e: Throwable) {
+            Log.w(TAG, "device-path probe failed: ${e.message}")
+            false
+        }
+    }
+
+    /**
+     * v6.4 — rebuild ONLY the tun2socks bridge, keeping the TUN interface, the
+     * Xray core and the user's session fully intact.
+     *
+     * This is the automatic equivalent of the manual "disconnect + reconnect"
+     * the user was performing to un-freeze Instagram — except it takes about a
+     * second, the VPN never drops, no permission dialog appears, and the UI
+     * never leaves the Connected state. Stopping the native service releases the
+     * entire stale session table; starting it again gives us a clean one.
+     */
+    private fun restartTun2Socks() {
+        val fd = try { tunInterface?.fd } catch (_: Throwable) { null } ?: return
+        Log.w(TAG, "restarting tun2socks bridge to clear a stalled session table")
+        try { TProxyService.TProxyStopService() } catch (_: Throwable) {}
+        try { tunnelThread?.interrupt() } catch (_: Throwable) {}
+        tunnelThread = null
+        try { Thread.sleep(250) } catch (_: InterruptedException) { return }
+        if (!running || stopping) return
+        try { startTun2Socks(fd) } catch (e: Throwable) {
+            Log.w(TAG, "tun2socks restart failed: ${e.message}")
         }
     }
 
@@ -983,6 +1197,14 @@ class NeonVpnService : VpnService() {
         // exponential backoff (2/4/8/16/32s) between failed revival attempts.
         // After the 5th failure the session is torn down and the user is told.
         private const val WATCHDOG_INTERVAL_MS = 7000L
+
+        /**
+         * v6.4 — run the heavier END-TO-END device-path probe every Nth healthy
+         * watchdog tick (~every 35s at the 7s base cadence). Frequent enough to
+         * catch a silent freeze long before the user notices a stuck video,
+         * cheap enough that it never competes with real traffic.
+         */
+        private const val PATH_CHECK_EVERY = 5
         private val WATCHDOG_BACKOFF_MS = longArrayOf(2000L, 4000L, 8000L, 16000L, 32000L)
 
         // v4.2 — only surface a "connection lost" after this many SUSTAINED hard

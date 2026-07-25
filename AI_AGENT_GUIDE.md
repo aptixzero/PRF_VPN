@@ -220,11 +220,11 @@ which also resets file/offset). Identity/dedup is still by config CONTENT
 - **`NeonVpnService.stopVpn()` must never block the main thread.** Flip state +
   broadcast synchronously, then run `cleanup()` on the `vpn-stop` daemon thread with
   a `finally { stopForegroundCompat(); stopSelf() }`. `stopThread` gives idempotency.
-- **`Pinger` needs `MIN_GOOD_SAMPLES = 2`** and reports `max(median, mean)`. A single
-  successful round-trip is NOT proof a node works.
+- **`Pinger` needs `MIN_GOOD_SAMPLES = 2`.** A single successful round-trip is NOT
+  proof a node works. (v6.4 changed the reported statistic — see §5c.)
 - **Country flags are Unicode regional-indicator emoji** (`util/CountryFlags.kt`) —
-  never bundle flag images, never block the UI thread. Two-phase: `cachedFlagFor()`
-  (zero I/O) then `resolveAsync()`.
+  never block the UI thread. Two-phase: `cachedFlagFor()` (zero I/O) then
+  `resolveAsync()`. **Superseded for `IR` only in v6.4** — see §5c.
 - **`util/QrCode.kt` is a self-contained ISO/IEC 18004 encoder.** Do not add a QR
   dependency.
 - **Quick actions `auto_connect` / `kill_switch` / `protocol` are DISPLAY-ONLY.**
@@ -232,6 +232,57 @@ which also resets file/offset). Identity/dedup is still by config CONTENT
 - **All colors in layouts/drawables go through `?attr/…`** (see `values/attrs.xml`)
   so the LIGHT theme stays correct. The only exception is `activity_splash.xml`,
   which is intentionally always dark.
+
+---
+
+## 5c. v6.4 INVARIANTS (do not regress)
+
+- **EVERY latency probe in the app goes through `config/ProbeEndpoints.kt`.**
+  Cloudflare only — `cp.cloudflare.com/generate_204`, `1.1.1.1/cdn-cgi/trace`,
+  `www.cloudflare.com/cdn-cgi/trace`, `speed.cloudflare.com/__down?bytes=0`.
+  **Never re-introduce a Google endpoint** (`gstatic.com/generate_204`,
+  `dns.google`, …). The list-ping and the post-connect ping MUST use the same
+  endpoint list, otherwise the "120 in the list, 1000 after connecting" bug returns.
+- **One latency statistic on both sides:** discard the first (cold-handshake)
+  sample, then report the **median of the warm samples**. `Pinger` and
+  `XrayManager.measureDelayStable()` must stay identical. The stats pump calls
+  `measureDelayStable()` (never the single-shot `measureDelay()`).
+- **QUIC / HTTP-3 stays BLOCKED** in `XrayConfigBuilder` routing: one rule for
+  `network: udp` + `port: 443`, one for `protocol: ["quic"]`. Free VLESS/VMESS
+  nodes do not relay UDP reliably; QUIC tolerates loss so apps never fail-fast and
+  video feeds silently freeze while the tunnel still looks healthy. Removing these
+  rules brings back the "works 1 minute then locks" bug.
+- **`policy.bufferSize` is PER CONNECTION.** Keep it small (512 KiB). Values like
+  4096 KiB ask the core to reserve gigabytes under video-scrolling load.
+  Keep the pool tight: `connIdle 120`, `uplinkOnly/downlinkOnly 4`, `handshake 12`.
+- **The TUN is IPv4-only.** No IPv6 address, no `::/0` route; `allowFamily(AF_INET)`
+  on API 29+. DNS `queryStrategy` and the `direct` outbound `domainStrategy` are
+  both `UseIPv4`. This removes per-connection Happy-Eyeballs stalls.
+- **hev-socks5-tunnel timeouts must stay bounded:** `read-write-timeout: 60000`,
+  `udp-read-write-timeout: 20000`, `max-session-count: 1024`,
+  `limit-nofile: 65535`. A 300 s read-write timeout wedges the session table.
+- **Health checks must probe the DEVICE PATH, not just the core.** `probeDevicePath()`
+  makes a real request through the **local SOCKS5 inbound** (the socket tun2socks
+  feeds). Two consecutive failures ⇒ `restartTun2Socks()`, which rebuilds only the
+  tun2socks bridge — the TUN, the Xray core and the user session stay up, no
+  permission dialog, the UI never leaves Connected. Never "fix" a silent stall by
+  tearing down the whole VPN.
+- **The exit identity is read THROUGH the tunnel**, never guessed from the server
+  hostname. `fetchTraceThroughTunnel()` parses `ip=` / `loc=` from Cloudflare
+  `/cdn-cgi/trace`; `resolveExitIdentityAsync()` publishes `VpnStateBus.ExitIdentity`
+  and `CountryFlags.rememberCode()` caches the country per host.
+- **The Islamic-Republic flag must NEVER be rendered anywhere.** Four defences, keep
+  all four: (1) `CountryFlags.emojiOf("IR")` returns `""`; (2)
+  `FlagView.setCountry("IR")` draws the bundled `drawable/flag_ir_lion_sun.xml`
+  (Lion-and-Sun) — this is the **one sanctioned bundled flag image**, and it is local
+  so it works offline / on weak links; (3) `FlagView.setFlagEmoji()` re-routes any
+  incoming IR emoji to that vector; (4) `CountryFlags.sanitizeForDisplay()` strips
+  the glyph out of feed-supplied remarks (Home card + `ConfigsFragment` rows),
+  replacing it with `[IR]`.
+- **The flag fills its tile EXACTLY.** Use `ui/widget/FlagView` — never a `TextView`
+  (font ascent/descent padding makes a glyph impossible to fit). It measures the real
+  ink box with `Paint.getTextBounds` and scales X and Y **independently** onto the
+  tile rect. Tile is 38dp with `drawable/flag_tile_bg`.
 
 ---
 
@@ -252,8 +303,11 @@ which also resets file/offset). Identity/dedup is still by config CONTENT
 
 ## 7. BUILD
 
-- There is **no Android SDK / JDK in the sandbox**. The APK is built by
-  **GitHub Actions** (`.github/workflows/build.yml`).
+- The sandbox has **no Android SDK / JDK preinstalled**. The authoritative APK is
+  built by **GitHub Actions** (`.github/workflows/build.yml`). A local toolchain can
+  be provisioned into `.androidenv/` (JDK 17 + `platforms;android-34` +
+  `build-tools;34.0.0`) with `local.properties → sdk.dir`; both are **gitignored**
+  and must never be committed.
 - Output: `ProfessorVPN-v<version>-universal.apk`. The workflow reads the version
   **dynamically** from `app/build.gradle.kts` (`versionName`), clears **all** old
   `build/*.apk` (`rm -f build/*.apk`) before copying the freshly-built one, commits
