@@ -631,7 +631,11 @@ class ServerAdapter(
 
     override fun onBindViewHolder(holder: VH, position: Int) {
         val cfg = items[position]
-        holder.name.text = cfg.remark
+        // v6.4 — public feeds often prefix a remark with the Islamic-Republic
+        // flag emoji, which this app must NEVER display. sanitizeForDisplay
+        // replaces that one glyph with the plain "[IR]" tag and leaves every
+        // other country's flag untouched.
+        holder.name.text = com.neonvpn.app.util.CountryFlags.sanitizeForDisplay(cfg.remark)
         holder.badge.text = cfg.protocol.uppercase()
 
         // ping result text (never reveal host/IP to protect the config)

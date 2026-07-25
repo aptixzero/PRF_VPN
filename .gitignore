@@ -20,3 +20,4 @@ build_log3.txt
 
 .buildenv/
 local.properties
+.androidenv/

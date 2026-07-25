@@ -90,10 +90,111 @@ object CountryFlags {
         val c = iso2?.trim()?.uppercase().orEmpty()
         if (c.length != 2) return ""
         if (c[0] !in 'A'..'Z' || c[1] !in 'A'..'Z') return ""
+        // ── v6.4 HARD RULE ────────────────────────────────────────────────
+        // The Islamic-Republic flag must NEVER be rendered anywhere in this
+        // app. The system font's "IR" emoji IS that flag, so this function
+        // refuses to produce it. Iran is drawn from the bundled Lion-and-Sun
+        // vector by [com.neonvpn.app.ui.widget.FlagView] instead — which also
+        // works offline / on a weak link, exactly as the brief demands.
+        if (c == IRAN) return ""
         val base = 0x1F1E6
         val first = base + (c[0] - 'A')
         val second = base + (c[1] - 'A')
         return String(Character.toChars(first)) + String(Character.toChars(second))
+    }
+
+    /** The ISO code Iran is identified by. Never rendered as an emoji. */
+    const val IRAN = "IR"
+
+    /**
+     * v6.4 — the ISO country code we can report RIGHT NOW with zero I/O.
+     *
+     * [FlagView] wants the CODE (so it can decide between a glyph and the
+     * bundled Lion-and-Sun vector), not a pre-rendered emoji. This is the same
+     * three-step lookup as [cachedFlagFor] but it stops at the code.
+     */
+    fun cachedCodeFor(ctx: Context, host: String, remark: String): String {
+        val key = normalizeHost(host)
+        memCache[key]?.let { if (it.isNotBlank()) return it }
+        val disk = loadDisk(ctx, key)
+        if (!disk.isNullOrBlank()) {
+            memCache[key] = disk
+            return disk
+        }
+        return guessFromText(remark).ifBlank { guessFromText(host) }
+    }
+
+    /**
+     * v6.4 — background resolution that reports the ISO CODE (not the emoji).
+     * Mirrors [resolveAsync] exactly; kept separate so existing callers keep
+     * working. Fire-and-forget, never blocks, de-duped per host.
+     */
+    fun resolveCodeAsync(ctx: Context, host: String, remark: String, onResolved: (String) -> Unit) {
+        val key = normalizeHost(host)
+        if (key.isBlank()) return
+
+        val known = cachedCodeFor(ctx, key, remark)
+        if (known.isNotBlank()) { runCatching { onResolved(known) }; return }
+
+        if (!inFlight.add(key)) return
+
+        val app = ctx.applicationContext
+        scope.launch {
+            val iso = try {
+                withTimeoutOrNull(LOOKUP_BUDGET_MS) { lookupCountry(key) }.orEmpty()
+            } catch (t: Throwable) {
+                Log.w(TAG, "lookup failed for $key: ${t.message}")
+                ""
+            } finally {
+                inFlight.remove(key)
+            }
+            if (iso.isNotBlank()) {
+                memCache[key] = iso
+                runCatching { saveDisk(app, key, iso) }
+                runCatching { onResolved(iso) }
+            }
+        }
+    }
+
+    /**
+     * v6.4 — STRIP THE ISLAMIC-REPUBLIC FLAG OUT OF ANY TEXT WE DISPLAY.
+     *
+     * The brief is absolute: *"under no circumstances may the Islamic-Republic
+     * flag be shown in the app."* [emojiOf] guarantees the app never GENERATES
+     * it, but public config feeds routinely prefix their remarks with it
+     * (e.g. "🇮🇷 Iran-Direct-01"), and that remark is shown verbatim on the Home
+     * card and in the config lists. So every remark passes through here first.
+     *
+     * The IR regional-indicator pair is replaced with the plain text tag
+     * `[IR]` — the information (which country) is preserved, the forbidden
+     * glyph is not. Everything else in the string, including other countries'
+     * flags, is left completely untouched.
+     */
+    fun sanitizeForDisplay(text: String?): String {
+        val s = text.orEmpty()
+        if (s.isEmpty()) return s
+        // Fast path: only do work if an 'I' regional indicator is present.
+        if (!s.contains(RI_I)) return s
+        return s.replace(IR_FLAG, "[IR]")
+    }
+
+    /** U+1F1EE — REGIONAL INDICATOR SYMBOL LETTER I. */
+    private val RI_I: String = String(Character.toChars(0x1F1EE))
+
+    /** The forbidden glyph: U+1F1EE U+1F1F7 (the Islamic-Republic flag). */
+    private val IR_FLAG: String = RI_I + String(Character.toChars(0x1F1F7))
+
+    /**
+     * v6.4 — remember a country we learned from the LIVE TUNNEL (the Cloudflare
+     * trace `loc=` field), so re-connecting to the same server paints the right
+     * flag instantly with no lookup at all.
+     */
+    fun rememberCode(ctx: Context, host: String, iso2: String) {
+        val key = normalizeHost(host)
+        val code = iso2.trim().uppercase()
+        if (key.isBlank() || code.length != 2 || code !in ISO_CODES) return
+        memCache[key] = code
+        runCatching { saveDisk(ctx.applicationContext, key, code) }
     }
 
     /**

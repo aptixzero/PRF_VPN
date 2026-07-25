@@ -72,29 +72,21 @@ object Pinger {
     private val probeScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     /**
-     * v4.7 — CENSORSHIP-GATED probe endpoints (NO Google, ever).
+     * v6.4 — CLOUDFLARE-ONLY probe endpoints, shared with the live connection.
      *
-     * Every entry here is a site that a strong filter blocks and that a real
-     * working proxy CAN reach. If a node can fetch these it genuinely bypasses
-     * censorship, so a green ping is trustworthy — and the number shown is the
-     * REAL measured round-trip through the tunnel, exactly what an Iranian user
-     * will experience.
+     * This list now comes from [ProbeEndpoints], the single source of truth used
+     * by EVERY latency path in the app (list ping, post-connect health check,
+     * watchdog, live stats ping). Before v6.4 the list pinged Cloudflare while
+     * the live connection pinged **Google**, which is precisely why a config
+     * that advertised 120 ms read ~1000 ms the second you connected to it: two
+     * different edges, two different routes, two different statistics.
      *
-     * Ordered FASTEST-FIRST so the common case (a working node) answers on the
-     * very first, tiniest probe:
-     *   1. Cloudflare edge 204 — a ~0-byte response, the fastest possible real
-     *      round-trip; Cloudflare is throttled/filtered on Iranian ISPs, so
-     *      reaching it proves the tunnel carries real TLS traffic.
-     *   2. Cloudflare trace    — tiny text body, second confirmation candidate.
-     *   3. Telegram            — classic blocked target, answers fast.
-     *   4. Instagram           — blocked target, last resort.
+     * NO Google anywhere. Cloudflare's anycast edge answers a zero-byte 204, so
+     * the number is pure latency, it is stable/reproducible, and because
+     * Cloudflare is throttled on Iranian ISPs, reaching it still proves the
+     * tunnel genuinely bypasses the filter.
      */
-    private val PROBE_URLS = listOf(
-        "https://cp.cloudflare.com/generate_204",        // Cloudflare edge (filtered, tiny 204)
-        "https://www.cloudflare.com/cdn-cgi/trace",      // Cloudflare trace (filtered, tiny body)
-        "https://core.telegram.org/robots.txt",          // Telegram (blocked target)
-        "https://i.instagram.com/favicon.ico"            // Instagram (blocked target)
-    )
+    private val PROBE_URLS = ProbeEndpoints.URLS
 
     /**
      * v4.7 — ONE confirmed censored-endpoint round-trip == reachable. The v4.6
@@ -106,11 +98,13 @@ object Pinger {
     private const val REQUIRED_CONFIRMATIONS = 1
 
     /**
-     * v4.8 — number of round-trips taken against the SAME reference endpoint,
-     * whose MEDIAN becomes the reported ping. 3 samples give a stable, jitter-
-     * resistant number without making the sweep slow.
+     * v6.4 — number of round-trips taken against the SAME reference endpoint,
+     * whose MEDIAN becomes the reported ping. Raised 3 → 4: with the endpoint
+     * now identical to the live connection's (Cloudflare only), one extra warm
+     * sample is what makes the list number and the connected number line up
+     * instead of differing by an order of magnitude.
      */
-    private const val SAMPLE_COUNT = 3
+    private const val SAMPLE_COUNT = 4
 
     /** Latency upper bound for a node we still treat as "reachable". */
     private const val MAX_VALID_MS = 8_000L
@@ -199,12 +193,19 @@ object Pinger {
             // won't carry traffic" nodes before the user ever taps connect.
             if (samples.size < MIN_GOOD_SAMPLES) return@withTimeoutOrNull UNREACHABLE
 
-            // Report the WORSE of median and mean so a node with one lucky fast
-            // sample and one slow one is not flattered — the number the user
-            // sees is closer to what they will actually feel.
-            val med = median(samples)
-            val mean = samples.sum() / samples.size
-            maxOf(med, mean)
+            // ── v6.4 — REPORT THE SAME STATISTIC THE LIVE CONNECTION REPORTS ──
+            // The list and the connected screen must agree, otherwise the user
+            // sees "120 in the list → 1000 after connecting" (the reported bug).
+            //
+            // The very FIRST sample is always the cold one: it pays for the full
+            // TCP + TLS/Reality handshake through a brand-new core. Every later
+            // sample rides the warmed-up path — which is exactly the state the
+            // tunnel is in once you are connected. So when we have enough
+            // samples we DROP the cold one and take the median of the warm rest;
+            // that is precisely how [XrayManager.measureDelay] now reports the
+            // live number, so the two figures finally describe the same thing.
+            val warm = if (samples.size >= 3) samples.drop(1) else samples
+            median(warm)
         }
         result ?: UNREACHABLE
     }

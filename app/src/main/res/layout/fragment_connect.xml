@@ -156,29 +156,27 @@
             android:foreground="?attr/selectableItemBackground"
             android:layout_marginTop="4dp">
 
-            <!-- v6.3 — COUNTRY FLAG holder. Empty by default; when connected the
-                 flag of the server's country is drawn here as a Unicode emoji so
-                 there is no image download and therefore zero lag/freeze. The
-                 square is small, so the glyph is clipped to it and never spills. -->
+            <!-- v6.4 — COUNTRY FLAG tile.
+                 The flag now FILLS the square completely (same width, same
+                 height) because it is painted by the custom FlagView rather
+                 than laid out as text: a TextView always leaves font padding
+                 around the glyph, which is exactly why the v6.3 flag looked
+                 smaller than its box. The tile is clipped to a rounded square
+                 so the flag can never spill outside it.
+                 Iran is drawn from the bundled Lion-and-Sun vector — the
+                 Islamic-Republic flag is never shown anywhere in the app. -->
             <FrameLayout
                 android:id="@+id/flag_box"
-                android:layout_width="34dp"
-                android:layout_height="34dp"
+                android:layout_width="38dp"
+                android:layout_height="38dp"
                 android:clipChildren="true"
                 android:clipToPadding="true"
-                android:background="@drawable/proto_tag_bg">
+                android:background="@drawable/flag_tile_bg">
 
-                <TextView
-                    android:id="@+id/flag_text"
+                <com.neonvpn.app.ui.widget.FlagView
+                    android:id="@+id/flag_view"
                     android:layout_width="match_parent"
-                    android:layout_height="match_parent"
-                    android:gravity="center"
-                    android:includeFontPadding="false"
-                    android:text=""
-                    android:maxLines="1"
-                    android:ellipsize="none"
-                    android:textSize="17sp"
-                    android:textColor="?attr/appTextPrimary" />
+                    android:layout_height="match_parent" />
             </FrameLayout>
 
             <LinearLayout
