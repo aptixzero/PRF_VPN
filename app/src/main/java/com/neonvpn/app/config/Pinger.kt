@@ -62,6 +62,13 @@ object Pinger {
     private const val PER_PROBE_BUDGET_MS = 5_000L
 
     /**
+     * v6.5 — pause before the final "sustain" round-trip, long enough that the
+     * probe must open a genuinely NEW connection rather than reusing the warm one
+     * the burst samples shared. See the sustain check in [ping].
+     */
+    private const val SUSTAIN_PAUSE_MS = 700L
+
+    /**
      * v4.7 — dedicated scope for the blocking native probe calls. The native
      * `measureOutboundDelay` ignores coroutine cancellation, so each probe runs
      * as an [async] child here and the caller awaits it with a timeout: when the
@@ -192,6 +199,30 @@ object Pinger {
             // the SAME endpoint. That single change filters out the "pings but
             // won't carry traffic" nodes before the user ever taps connect.
             if (samples.size < MIN_GOOD_SAMPLES) return@withTimeoutOrNull UNREACHABLE
+
+            // ── v6.5 — THE SUSTAIN CHECK ("if it pings, it connects") ─────────
+            // The remaining false-green case in v6.4: a node that answers a
+            // burst of back-to-back 204s (they all ride ONE warm connection) and
+            // then dies as soon as a NEW connection is opened a moment later —
+            // which is exactly what happens when the user taps connect. All the
+            // samples above are taken within a few hundred ms of each other, so
+            // they cannot see that.
+            //
+            // So after a deliberate pause we open ONE more round-trip. Passing it
+            // proves the node still accepts a FRESH handshake, i.e. it will still
+            // be there when the connect path dials it. Nodes with only two good
+            // samples must pass this; a node that already produced three or more
+            // successes has demonstrated enough and is accepted as-is (keeps the
+            // sweep fast and never turns a genuinely good node red).
+            if (samples.size < 3) {
+                try { kotlinx.coroutines.delay(SUSTAIN_PAUSE_MS) } catch (_: Throwable) {}
+                val sustain = singleProbe(json, refUrl)
+                if (sustain !in 1..MAX_VALID_MS) {
+                    Log.w(TAG, "sustain check failed — node answers once then collapses")
+                    return@withTimeoutOrNull UNREACHABLE
+                }
+                samples.add(sustain)
+            }
 
             // ── v6.4 — REPORT THE SAME STATISTIC THE LIVE CONNECTION REPORTS ──
             // The list and the connected screen must agree, otherwise the user

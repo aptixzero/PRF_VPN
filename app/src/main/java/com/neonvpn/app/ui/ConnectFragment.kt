@@ -336,6 +336,29 @@ class ConnectFragment : Fragment() {
         } catch (_: Throwable) { }
     }
 
+    /**
+     * v6.5 — THE REPEATED CONNECT / DISCONNECT + CONFIG-SWITCH HANDLER (UI half).
+     *
+     * The user's requirement, verbatim in spirit: *press disconnect, then connect
+     * to a DIFFERENT config with no problem; switch between configs over and over
+     * WITHOUT closing the app; leave the app, come back, tap ping, tap connect on
+     * the next config — and it must work every single time.*
+     *
+     * In v6.4 the UI reported DISCONNECTED the instant the STOP intent was sent,
+     * so the only thing between a stop and the next start was the 350 ms tap
+     * debounce — far less than the teardown actually needs. The service then
+     * received a start while the old session was still unwinding and dropped it.
+     *
+     * v6.5 fixes the ordering in the SERVICE (single serialised session thread,
+     * see NeonVpnService), so the UI no longer has to guess. Here we simply make
+     * the UI honest and never lose a tap:
+     *
+     *   • a tap while CONNECTED/CONNECTING is a disconnect (unchanged);
+     *   • a tap while DISCONNECTED always delivers a fresh start intent — even if
+     *     a teardown is still in flight, because the service queues it;
+     *   • the requested config is captured at tap time, so the switch always
+     *     applies to what the user actually selected.
+     */
     private fun onToggle() {
         val current = VpnStateBus.state
         if (current == NeonVpnService.STATE_CONNECTED ||
@@ -353,6 +376,9 @@ class ConnectFragment : Fragment() {
         }
 
         try {
+            // VpnService.prepare() returns null once permission was granted, so
+            // the 2nd/3rd/Nth connect in a session goes straight through — no
+            // dialog, no delay. (A revoked permission correctly re-prompts.)
             val prepare = VpnService.prepare(requireContext())
             if (prepare != null) {
                 vpnPermissionLauncher.launch(prepare)
@@ -366,13 +392,26 @@ class ConnectFragment : Fragment() {
 
     private fun actuallyStartVpn() {
         try {
-            render(NeonVpnService.STATE_CONNECTING, store.getSelected()?.remark ?: "")
+            val remark = store.getSelected()?.remark ?: ""
+            // Publish CONNECTING on the shared bus (not just locally) so every
+            // other screen — server list, drawer — agrees, and so a stale
+            // DISCONNECTED left behind by the previous stop cannot make the next
+            // tap look like it did nothing.
+            VpnStateBus.update(NeonVpnService.STATE_CONNECTING, remark)
+            render(NeonVpnService.STATE_CONNECTING, remark)
             val intent = Intent(requireContext(), NeonVpnService::class.java)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                requireContext().startForegroundService(intent)
-            } else {
-                requireContext().startService(intent)
-            }
+            // v6.5 — deliver defensively in BOTH directions. startForegroundService
+            // is required on O+ when the service isn't running, but it throws if
+            // the app is considered background at that instant; startService works
+            // when the service is already up (the config-switch case). Trying one
+            // and falling back to the other means a connect tap is never lost.
+            val ctx = requireContext()
+            val ok = runCatching {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) ctx.startForegroundService(intent)
+                else ctx.startService(intent)
+                true
+            }.getOrDefault(false)
+            if (!ok) runCatching { ctx.startService(intent) }
         } catch (e: Throwable) {
             render(NeonVpnService.STATE_ERROR, "Failed to start VPN service")
         }

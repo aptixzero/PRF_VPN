@@ -1,6 +1,6 @@
 {
-  "version": 21,
-  "latestApkVersion": "6.4",
+  "version": 22,
+  "latestApkVersion": "6.5",
   "appLogo": {
     "url": ""
   },
@@ -51,6 +51,16 @@
         "note": ""
       }
     ]
+  },
+  "qrLink": {
+    "enabled": true,
+    "url": "https://professorvpn.vercel.app/",
+    "caption": "این بارکد را با دوربین گوشی اسکن کنید"
+  },
+  "qrcode": {
+    "enabled": true,
+    "url": "https://professorvpn.vercel.app/",
+    "caption": "این بارکد را با دوربین گوشی اسکن کنید"
   },
   "notice": {
     "enabled": false,

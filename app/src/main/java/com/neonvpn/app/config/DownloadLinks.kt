@@ -73,6 +73,77 @@ data class DownloadLinksConfig(
 }
 
 /**
+ * v6.5 — "لینک پشت بارکد" (THE LINK BEHIND THE BARCODE).
+ *
+ * Published by the admin panel's new section of the same name: the operator
+ * pastes a link, presses "ساخت بارکد", and the panel writes it here. The app
+ * then renders THAT link — and nothing else — into the QR code on the Download
+ * Links page, so anyone who scans it with any phone camera is taken straight to
+ * the operator's URL in their BROWSER.
+ *
+ * Why this block exists at all (the v6.4 bug):
+ *   v6.4 had no panel field. It built the QR payload itself by taking the first
+ *   download link and appending `?bt=1&v=…`. The `bt=1` marker exists so that
+ *   when OUR app opens the link it starts the Bluetooth hand-off — but it also
+ *   meant the QR never contained a clean, operator-chosen URL, and the app
+ *   registers a `professorvpn://get` deep link for the same page, so a scan
+ *   could be captured by the app instead of opening a browser. Now the operator
+ *   decides exactly what the barcode resolves to, and the payload is used
+ *   VERBATIM.
+ */
+data class QrLinkConfig(
+    /** Master switch. When false the app falls back to the download link. */
+    val enabled: Boolean = true,
+    /**
+     * The exact URL the barcode must resolve to. Used verbatim — the app never
+     * appends tracking or hand-off parameters to it, because anything extra is
+     * what stopped the old code from being a plain browser link.
+     */
+    val url: String = "",
+    /** Optional caption rendered under the barcode in the app. */
+    val caption: String = ""
+) {
+    /** True when the operator has published a usable http(s) link. */
+    val hasLink: Boolean
+        get() = enabled && normalizedUrl().isNotBlank()
+
+    /**
+     * The scan-safe form of [url].
+     *
+     * A QR code is only useful if the scanner recognises the payload as a web
+     * address, and phone cameras only offer "open in browser" for an explicit
+     * scheme. Operators very often paste `example.com/x` without one, so we add
+     * `https://` when it is missing rather than silently producing a barcode
+     * that scans as meaningless text.
+     */
+    fun normalizedUrl(): String {
+        val raw = url.trim()
+        if (raw.isBlank()) return ""
+        val lower = raw.lowercase()
+        return when {
+            lower.startsWith("http://") || lower.startsWith("https://") -> raw
+            // Anything with an explicit non-web scheme (tg:, mailto:, …) is the
+            // operator's deliberate choice and is passed through untouched.
+            Regex("^[a-z][a-z0-9+.\\-]*:").containsMatchIn(lower) -> raw
+            else -> "https://$raw"
+        }
+    }
+
+    companion object {
+        fun parse(o: JSONObject?, def: QrLinkConfig): QrLinkConfig {
+            if (o == null) return def
+            return QrLinkConfig(
+                enabled = o.optBoolean("enabled", def.enabled),
+                // Accept both `url` and `link` so a hand-edited config or an
+                // older panel build still works.
+                url = o.optString("url", "").ifBlank { o.optString("link", def.url) },
+                caption = o.optString("caption", def.caption)
+            )
+        }
+    }
+}
+
+/**
  * The in-app announcement published from the panel's "اعلان‌ها" tab.
  *
  * IMPORTANT (per the brief): the app must present this as an announcement from

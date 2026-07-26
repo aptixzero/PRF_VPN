@@ -24,7 +24,10 @@ import java.io.File
  */
 class XrayManager(private val context: Context) {
 
-    private var controller: CoreController? = null
+    @Volatile private var controller: CoreController? = null
+
+    /** v6.5 — serialises start/stop so sessions can never overlap. */
+    private val lifecycleLock = Any()
 
     @Volatile var isRunning: Boolean = false
         private set
@@ -53,32 +56,63 @@ class XrayManager(private val context: Context) {
         "?"
     }
 
+    /**
+     * v6.5 — the CONFIG-SWITCH fix.
+     *
+     * v6.4 opened with `if (isRunning) return true`. That single line is the
+     * reason switching to a different config without killing the app did
+     * nothing: the service asked the core to start the NEW json, the core said
+     * "already running" and happily kept serving the OLD outbound — or, once
+     * the previous session had half-torn-down, kept a dead controller. From
+     * v6.5 a start ALWAYS lands on a freshly created controller, and any
+     * previous one is stopped and drained first (the local SOCKS/api ports must
+     * be free before the new core can bind them, otherwise startLoop throws
+     * "address already in use" and the connect fails silently).
+     *
+     * Serialised on [lifecycleLock] so a stop can never interleave a start.
+     */
     fun start(configJson: String): Boolean {
-        if (isRunning) return true
-        return try {
-            val handler = object : CoreCallbackHandler {
-                override fun startup(): Long = 0L
-                override fun shutdown(): Long = 0L
-                override fun onEmitStatus(l: Long, s: String?): Long = 0L
+        synchronized(lifecycleLock) {
+            // Always begin from a clean slate — never reuse a live controller.
+            if (controller != null || isRunning) {
+                Log.i(TAG, "start(): previous core still present, stopping it first")
+                stopLocked()
             }
-            val c = Libv2ray.newCoreController(handler)
-            // mode 1 == run with the supplied config json. startLoop is void and
-            // throws if the core can't parse / bind, so a clean return == started.
-            c.startLoop(configJson, 1)
-            controller = c
-            isRunning = try { c.isRunning } catch (_: Throwable) { true }
-            Log.i(TAG, "Xray core started, running=$isRunning")
-            isRunning
-        } catch (e: Throwable) {
-            Log.e(TAG, "start failed: ${e.message}", e)
-            isRunning = false
-            try { controller?.stopLoop() } catch (_: Throwable) {}
-            controller = null
-            false
+            // Give the OS a moment to release the local listener sockets
+            // (10808/10809) the old core owned. Without this the new core can
+            // fail to bind and the user sees "connect does nothing".
+            waitForLocalPortsFree()
+            return try {
+                val handler = object : CoreCallbackHandler {
+                    override fun startup(): Long = 0L
+                    override fun shutdown(): Long = 0L
+                    override fun onEmitStatus(l: Long, s: String?): Long = 0L
+                }
+                val c = Libv2ray.newCoreController(handler)
+                // mode 1 == run with the supplied config json. startLoop is void and
+                // throws if the core can't parse / bind, so a clean return == started.
+                c.startLoop(configJson, 1)
+                controller = c
+                isRunning = try { c.isRunning } catch (_: Throwable) { true }
+                totalUp = 0L
+                totalDown = 0L
+                Log.i(TAG, "Xray core started, running=$isRunning")
+                isRunning
+            } catch (e: Throwable) {
+                Log.e(TAG, "start failed: ${e.message}", e)
+                isRunning = false
+                try { controller?.stopLoop() } catch (_: Throwable) {}
+                controller = null
+                false
+            }
         }
     }
 
     fun stop() {
+        synchronized(lifecycleLock) { stopLocked() }
+    }
+
+    private fun stopLocked() {
         try {
             controller?.stopLoop()
         } catch (e: Throwable) {
@@ -89,6 +123,33 @@ class XrayManager(private val context: Context) {
             totalUp = 0L
             totalDown = 0L
         }
+    }
+
+    /**
+     * v6.5 — blocks (briefly) until the core's local inbound ports are actually
+     * free again. `stopLoop()` returns before the listener sockets are reaped,
+     * so a fast reconnect used to hit EADDRINUSE. We probe rather than sleep a
+     * fixed amount, so a healthy device reconnects in ~50 ms instead of always
+     * paying a worst-case delay.
+     */
+    private fun waitForLocalPortsFree(timeoutMs: Long = 3000) {
+        val ports = intArrayOf(XrayConfigBuilder.SOCKS_PORT, XrayConfigBuilder.API_PORT)
+        val deadline = System.currentTimeMillis() + timeoutMs
+        while (System.currentTimeMillis() < deadline) {
+            if (ports.all { isPortFree(it) }) return
+            try { Thread.sleep(50) } catch (_: InterruptedException) { return }
+        }
+        Log.w(TAG, "local ports still busy after ${timeoutMs}ms — starting anyway")
+    }
+
+    private fun isPortFree(port: Int): Boolean = try {
+        java.net.ServerSocket().use { s ->
+            s.reuseAddress = true
+            s.bind(java.net.InetSocketAddress("127.0.0.1", port))
+            true
+        }
+    } catch (_: Throwable) {
+        false
     }
 
     /**
@@ -228,7 +289,7 @@ class XrayManager(private val context: Context) {
             readTimeout = 6000
             requestMethod = "GET"
             instanceFollowRedirects = true
-            setRequestProperty("User-Agent", "ProfessorVPN/6.4 (Android)")
+            setRequestProperty("User-Agent", "ProfessorVPN/6.5 (Android)")
             setRequestProperty("Accept", "*/*")
         }
         return try {

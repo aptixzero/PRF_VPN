@@ -31,7 +31,7 @@
   var LS_CFG   = "pv_cfg_cache";
 
   // The PUBLIC repo/path the app reads. Publishing writes here.
-  var PUB_REPO = "aptixzero/PRF_VPN";
+  var PUB_REPO = "aptixzero/my_prFF_vP_N";
   var PUB_PATH = "adminpanel/app_config.json";
   var CONFIG_URL =
     "https://raw.githubusercontent.com/" + PUB_REPO + "/main/" + PUB_PATH;
@@ -81,7 +81,7 @@
   function defaultModel() {
     return {
       version: 1,
-      latestApkVersion: "6.4",
+      latestApkVersion: "6.5",
       appLogo: { url: "" },
       inAppTelegramUrl: "",
       contact: {
@@ -100,7 +100,11 @@
       // v6.3 — drawer → "Download Links" page
       downloadLinks: { enabled: true, heading: "", note: "", items: [] },
       // v6.3 — in-app announcement (title is fixed in the app)
-      notice: { enabled: false, title: "اعلان Professor Vpn", text: "", id: "", color: "#8A3FFC" }
+      notice: { enabled: false, title: "اعلان Professor Vpn", text: "", id: "", color: "#8A3FFC" },
+      // v6.5 — "لینک پشت بارکد": the link the app encodes into the QR code on
+      // its Download Links page. Scanning it opens THIS url in the scanner's
+      // browser. Matches QrLinkConfig.kt (enabled / url / caption).
+      qrLink: { enabled: true, url: "", caption: "" }
     };
   }
 
@@ -134,7 +138,7 @@
     setVal("bn-text", bn.text || "");
     if (bn.textColor) setVal("bn-color", bn.textColor);
     setVal("bn-url", bn.url || "");
-    setVal("hm-apk", cfg.latestApkVersion || "6.4");
+    setVal("hm-apk", cfg.latestApkVersion || "6.5");
     // donate tab
     var dn = cfg.donate || {};
     setVal("dn-heading", dn.heading || "");
@@ -173,6 +177,13 @@
     setVal("nt-text", nt.text || nt.message || "");
     if (nt.color) setVal("nt-color", nt.color);
     refreshNoticePreview();
+
+    // barcode link tab (v6.5)
+    var qr = cfg.qrLink || cfg.qrcode || cfg.barcode || {};
+    setChk("qr-enabled", qr.enabled !== false);
+    setVal("qr-url", qr.url || qr.link || "");
+    setVal("qr-caption", qr.caption || "");
+    refreshQrPreview();
   }
 
   // Read the form fields into a fresh config object matching RemoteConfig.kt.
@@ -181,7 +192,7 @@
     m.version = (prevVersion || 0) + 1;
     m.ts = Date.now();
     m.lastUpdatedAt = Date.now();
-    m.latestApkVersion = trimv("hm-apk") || "6.4";
+    m.latestApkVersion = trimv("hm-apk") || "6.5";
 
     var inapp = trimv("ln-inapp");
     m.inAppTelegramUrl = inapp;
@@ -275,7 +286,31 @@
     };
     m.notification = JSON.parse(JSON.stringify(m.notice));
 
+    // v6.5 — "لینک پشت بارکد". Normalised the SAME way QrLinkConfig.kt does it,
+    // so the barcode the panel previews is byte-identical to the one the app
+    // draws: a bare "example.com/x" gets an https:// scheme (a QR without a
+    // scheme scans as plain text and no camera offers to open it), while an
+    // explicit scheme the operator chose is passed through untouched.
+    m.qrLink = {
+      enabled: checked("qr-enabled"),
+      url: normalizeLink(trimv("qr-url")),
+      caption: trimv("qr-caption")
+    };
+    // legacy aliases so an older app build still finds it
+    m.qrcode = JSON.parse(JSON.stringify(m.qrLink));
+
     return m;
+  }
+
+  /* ------------------------------------------------------- link normaliser - */
+  // Mirrors QrLinkConfig.normalizedUrl() in the app, character for character.
+  function normalizeLink(raw) {
+    raw = (raw || "").trim();
+    if (!raw) return "";
+    var lower = raw.toLowerCase();
+    if (lower.indexOf("http://") === 0 || lower.indexOf("https://") === 0) return raw;
+    if (/^[a-z][a-z0-9+.\-]*:/.test(lower)) return raw;   // tg:, mailto:, …
+    return "https://" + raw;
   }
 
   /* --------------------------------------------------- download links UI --- */
@@ -323,6 +358,75 @@
     if (pv) pv.textContent = t || "—";
     var ac = $("nt-pv-accent");
     if (ac) ac.style.background = trimv("nt-color") || "#8A3FFC";
+  }
+
+  /* ------------------------------------------- v6.5 — «لینک پشت بارکد» ---- */
+
+  /**
+   * Draw the barcode for whatever is currently in `qr-url`.
+   *
+   * This is deliberately the SAME encoder the app uses (qrcode.js is a port of
+   * QrCode.kt, interleave fix included), so the preview the operator approves
+   * here is module-for-module the code the user's phone will scan. Anything
+   * less — a CDN QR service, a different library — and the panel could show a
+   * working code while the app renders a broken one, which is precisely the
+   * v6.4 situation we are fixing.
+   *
+   * `silent` suppresses the toast, so config loads / keystrokes don't spam it.
+   */
+  function refreshQrPreview(silent) {
+    var canvas = $("qr-canvas");
+    var status = $("qr-status");
+    var urlOut = $("qr-preview-url");
+    var dl = $("qr-download");
+    if (!canvas) return;
+
+    var raw = trimv("qr-url");
+    var link = normalizeLink(raw);
+    var on = checked("qr-enabled");
+    var ctx = canvas.getContext("2d");
+
+    function clear(msg) {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.fillStyle = "#0d0d16";
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      if (status) status.textContent = msg;
+      if (urlOut) urlOut.textContent = "—";
+      if (dl) dl.classList.add("hidden");
+    }
+
+    if (!link) { clear("لینکی وارد نشده — بارکد ساخته نمی‌شود."); return; }
+    if (!on) { clear("بارکد خاموش است. برای نمایش در برنامه، سوییچ را روشن کنید."); return; }
+
+    if (typeof window.PanelQr === "undefined") {
+      clear("موتور بارکد بارگذاری نشد (qrcode.js).");
+      return;
+    }
+
+    try {
+      // QUARTILE (~25 % damage tolerance) matches DownloadsActivity.renderQr():
+      // enough redundancy for a phone camera pointed at a glossy screen, while
+      // still keeping the modules chunky for short URLs.
+      var modules = window.PanelQr.draw(canvas, link, {
+        ecc: "QUARTILE",
+        sizePx: 320,
+        quietZone: 4,
+        dark: "#000000",
+        light: "#ffffff"
+      });
+      if (urlOut) urlOut.textContent = link;
+      if (status) {
+        status.textContent = "بارکد ساخته شد • " + modules + "×" + modules +
+          " ماژول • با دوربین گوشی اسکن کنید تا مرورگر همین لینک را باز کند.";
+      }
+      if (dl) {
+        dl.href = canvas.toDataURL("image/png");
+        dl.classList.remove("hidden");
+      }
+      if (!silent) toast("بارکد ساخته شد");
+    } catch (e) {
+      clear("ساخت بارکد ممکن نشد: " + (e && e.message ? e.message : e));
+    }
   }
 
   /* ----------------------------------------------------- custom donate UI -- */
@@ -524,12 +628,15 @@
     Array.prototype.forEach.call(document.querySelectorAll(".tab"), function (t) {
       t.classList.toggle("active", t.getAttribute("data-tab") === name);
     });
-    ["tracking", "links", "home", "donate", "downloads", "notice", "preview", "publish"].forEach(function (n) {
+    ["tracking", "links", "home", "donate", "downloads", "qrlink", "notice", "preview", "publish"].forEach(function (n) {
       var s = $("tab-" + n);
       if (s) s.classList.toggle("hidden", n !== name);
     });
     if (name === "tracking") loadStats();
     if (name === "downloads") renderDownloads();
+    // Redraw on entry: the canvas may have been sized while hidden (a hidden
+    // canvas reports width 0), so the code must be re-rendered once visible.
+    if (name === "qrlink") refreshQrPreview(true);
     if (name === "notice") refreshNoticePreview();
     if (name === "preview") refreshPreview();
     if (name === "publish") updateJsonPreview();
@@ -619,6 +726,35 @@
       if (e) e.addEventListener("keydown", function (ev) {
         if (ev.key === "Enter" && adl) adl.click();
       });
+    });
+
+    // v6.5 — «ساخت بارکد». The button is the explicit, deliberate action the
+    // operator asked for; the input listeners keep the preview honest so the
+    // canvas can never show a barcode for a link that is no longer in the box.
+    var mk = $("btn-make-qr");
+    if (mk) mk.addEventListener("click", function () {
+      var raw = trimv("qr-url");
+      if (!raw) { toast("اول لینک را وارد کنید"); return; }
+      var link = normalizeLink(raw);
+      // Write the normalised form back so what the operator sees is exactly
+      // what gets published AND what gets encoded — no hidden rewriting.
+      setVal("qr-url", link);
+      setChk("qr-enabled", true);
+      refreshQrPreview(false);
+    });
+    var qrUrl = $("qr-url");
+    if (qrUrl) {
+      qrUrl.addEventListener("input", function () { refreshQrPreview(true); });
+      qrUrl.addEventListener("keydown", function (ev) {
+        if (ev.key === "Enter") { ev.preventDefault(); if (mk) mk.click(); }
+      });
+    }
+    ["qr-enabled", "qr-caption"].forEach(function (id) {
+      var e = $(id);
+      if (e) {
+        e.addEventListener("input", function () { refreshQrPreview(true); });
+        e.addEventListener("change", function () { refreshQrPreview(true); });
+      }
     });
 
     // v6.3 — notice live preview

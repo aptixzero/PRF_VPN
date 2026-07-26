@@ -117,12 +117,17 @@ class DownloadsActivity : BaseActivity() {
 
         findViewById<View>(R.id.btn_bluetooth).setOnClickListener { onBluetoothTapped() }
 
-        bind(RemoteConfigStore.current())
-        renderQr()
-
         // Someone scanned our code: their phone opened us with bt=1. Turn their
         // Bluetooth on right away and tell them the other side must be on too.
+        // v6.5 — resolved BEFORE bind()/renderQr() so the caption logic knows
+        // whether it may overwrite the hand-off prompt.
         arrivedFromScan = intent?.data?.getQueryParameter("bt") == "1"
+
+        bind(RemoteConfigStore.current())
+
+        // v6.5 — tapping the barcode opens the same link in a browser, so the
+        // owner of the phone can use it too rather than needing a second device.
+        qrImage.setOnClickListener { openInBrowser(buildQrPayload()) }
         if (arrivedFromScan) {
             btStatus.setText(R.string.downloads_bt_prompt)
             qrImage.post { onBluetoothTapped() }
@@ -153,6 +158,15 @@ class DownloadsActivity : BaseActivity() {
         adapter.submit(items)
         empty.visibility = if (items.isEmpty()) View.VISIBLE else View.GONE
         list.visibility = if (items.isEmpty()) View.GONE else View.VISIBLE
+
+        // v6.5 — REDRAW THE BARCODE whenever the panel config changes.
+        // v6.4 only encoded the QR once, in onCreate(), using whatever config was
+        // cached at that moment. The panel refresh a second later then updated the
+        // link list but left the barcode showing the STALE payload — so publishing
+        // a new "لینک پشت بارکد" appeared to do nothing until the app was
+        // restarted. Re-rendering here keeps the code and the published link in
+        // lockstep (encoding costs well under a millisecond).
+        renderQr()
     }
 
     /**
@@ -162,22 +176,72 @@ class DownloadsActivity : BaseActivity() {
      */
     private fun renderQr() {
         val payload = buildQrPayload()
-        val bmp = runCatching { QrCode.bitmap(payload, sizePx = 640) }.getOrNull()
+        // v6.5 — QUARTILE error correction (25% recoverable) instead of MEDIUM.
+        // A barcode on a phone screen is scanned off a GLOSSY, reflective surface
+        // by another phone's camera, often at an angle and under room lighting;
+        // glare wipes out whole modules. The stronger level costs a slightly
+        // denser code (still trivially scannable at this size) and buys a large
+        // margin against exactly the real-world conditions the user described.
+        val bmp = runCatching {
+            QrCode.bitmap(payload, sizePx = 640, ecc = QrCode.Ecc.QUARTILE)
+        }.getOrNull() ?: runCatching {
+            // If the payload is too long for QUARTILE at any version, fall back
+            // rather than showing an empty box.
+            QrCode.bitmap(payload, sizePx = 640)
+        }.getOrNull()
         if (bmp != null) qrImage.setImageBitmap(bmp)
+        renderQrCaption()
+    }
+
+    /** v6.5 — show the operator's optional caption under the barcode. */
+    private fun renderQrCaption() {
+        val cfg = RemoteConfigStore.current()
+        val caption = cfg.qrLink.caption.trim()
+        if (caption.isBlank()) return
+        // Reuse the Bluetooth status line (it sits directly under the code) so no
+        // layout change is needed and the text can never overlap anything. The
+        // scan hand-off prompt still wins when someone arrived via a scan.
+        if (!arrivedFromScan) btStatus.text = caption
     }
 
     /**
-     * What the scanner receives. We prefer a real https link (every camera app
-     * understands it and it also works for people who don't have the app yet),
-     * and append `bt=1` so that when the link is opened *by our app* it triggers
-     * the automatic Bluetooth hand-off described in the class docs.
+     * v6.5 — WHAT THE SCANNER ACTUALLY RECEIVES.
+     *
+     * Reported bug: *"the barcode doesn't work — it must be a REAL barcode that
+     * takes the scanner to the link."* Two separate things were wrong, and both
+     * are fixed:
+     *
+     *   1. the encoder itself produced an undecodable matrix — fixed in
+     *      [QrCode] (see the interleave comment there);
+     *   2. the PAYLOAD was not a clean link. v6.4 took the first download link
+     *      and appended `?bt=1&v=6.4`. The `bt=1` marker only means something to
+     *      THIS app, and because the app registers a deep link for this very
+     *      page, a scan could be swallowed by the app instead of opening the
+     *      scanner's browser — and on a phone that doesn't have the app, the
+     *      extra query string is just noise on the operator's URL.
+     *
+     * So v6.5 encodes ONE thing, verbatim: the link the operator typed into the
+     * panel's "لینک پشت بارکد" box. Nothing is appended. A plain `https://…`
+     * payload is what every phone camera recognises and offers to open in the
+     * browser, which is exactly the requested behaviour.
+     *
+     * Fallback order when the operator hasn't published a barcode link yet:
+     * first download link → the releases landing page. Both are still emitted as
+     * clean URLs with no `bt=1`.
      */
     private fun buildQrPayload(): String {
         val cfg = RemoteConfigStore.current()
+
+        // 1) the operator's explicit barcode link wins, used EXACTLY as given.
+        val panelLink = cfg.qrLink.normalizedUrl()
+        if (cfg.qrLink.enabled && panelLink.isNotBlank()) return panelLink
+
+        // 2) otherwise the first published download link, unmodified.
         val first = cfg.downloadLinks.items.firstOrNull()?.url?.trim().orEmpty()
-        val base = first.ifBlank { DEFAULT_LANDING }
-        val sep = if (base.contains('?')) "&" else "?"
-        return "$base${sep}bt=1&v=${cfg.latestApkVersion.ifBlank { appVersion() }}"
+        if (first.isNotBlank()) return first
+
+        // 3) last resort: the public releases page.
+        return DEFAULT_LANDING
     }
 
     private fun appVersion(): String = runCatching {

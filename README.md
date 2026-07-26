@@ -27,9 +27,42 @@ selected server. Only **VLESS** and **VMESS** configs are supported.
 ## Download
 
 The latest signed universal APK is published on the
-[Releases](https://github.com/aptixzero/PRF_VPN/releases/latest) page and mirrored in
-[`build/`](./build). The current artifact is `ProfessorVPN-v6.4-universal.apk`.
+[Releases](https://github.com/aptixzero/my_prFF_vP_N/releases/latest) page and mirrored
+in [`build/`](./build). The current artifact is `ProfessorVPN-v6.5-universal.apk`.
 Free configs are fetched live from the 50 public feeds in `LiveSources.kt`.
+
+### What's new in v6.5 — see [`RELEASE_NOTES_v6.5.md`](./RELEASE_NOTES_v6.5.md)
+
+v6.5 is a reliability release; it fixes four defects rather than adding features.
+
+- **Reconnect works every time.** v6.4 connected once and then refused to connect
+  again until the app was killed — four separate races in the teardown path
+  (`XrayManager.start()` short-circuiting on an already-running core, detached
+  start/stop threads with no handshake, `TProxyService` having no native run-state,
+  and a stale watchdog reviving a closed descriptor). Every lifecycle request now
+  goes through one single-threaded executor with a generation counter, so a start
+  can never begin before the preceding stop has finished. Disconnect → connect to a
+  *different* config, repeatedly, without closing the app.
+- **No more stalling mid-stream.** Congestion control is now `bbr`, which paces from
+  measured bandwidth × RTT instead of reading mobile packet loss as congestion — the
+  cause of "the first three videos load, then it freezes". There is no session time
+  limit or connection-type limit anywhere.
+- **A config that pings will connect.** The live gate was stricter than the list ping,
+  so a 3–5 s node showed green and then failed; the gate now has a 14 s budget and
+  accepts a real packet through the local SOCKS5 proxy. The ping side gained a
+  *sustain check* that rejects a node which answers one burst and then dies.
+- **The barcode actually scans.** `QrCode.interleave()` subtracted the
+  error-correction codewords twice, so every block was short and only part of the
+  matrix was written — the codes looked flawless but failed Reed–Solomon in every
+  scanner (e.g. 44 of 70 codewords written). Fixed, guarded against regression, and
+  verified by decoding the output with a from-scratch ISO 18004 decoder.
+
+The admin panel gains a **«لینک پشت بارکد»** tab: paste a link, press
+«ساخت بارکد», and the barcode is generated and previewed with the app's own
+encoder (so panel and app can never disagree). Scanning it opens that link in the
+visitor's browser.
+
+**Admin panel:** <https://aptixzero.github.io/my_prFF_vP_N/>
 
 ## Build
 

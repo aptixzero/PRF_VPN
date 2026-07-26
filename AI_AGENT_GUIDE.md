@@ -286,6 +286,132 @@ which also resets file/offset). Identity/dedup is still by config CONTENT
 
 ---
 
+## 5d. v6.5 INVARIANTS (do not regress)
+
+v6.5 fixed four *reported* defects. Each fix is one small, specific change, and
+each is easy to undo by accident. Read this section before touching the service
+lifecycle, the ping gate, or the QR encoder.
+
+### The session lifecycle is SERIALISED. Never spawn a bare start/stop thread.
+
+The v6.4 "connects once, then never again until you kill the app" bug was four
+races in the teardown path. All four are closed by one design rule:
+
+> **Every** connect / disconnect / config-switch request is queued on the single
+> `sessionExecutor` in `NeonVpnService`, and every worker thread checks the
+> session `generation` before it acts.
+
+- `sessionExecutor` is a **single-thread** executor (`Executors.newSingleThreadExecutor`,
+  thread name `vpn-session`). Do **not** replace it with a pool, and do **not**
+  `Thread { … }.start()` a lifecycle step — that is exactly what allowed a new core
+  to race the old one for ports 10808 / 10809.
+- `generation` is bumped on every new request; `isStale(myGen)` must be re-checked
+  at **every stage** of `startVpn(myGen)`. Worker threads are named
+  `watchdog-$gen` / `stats-$gen` so a leaked thread is visible in logcat.
+- `pendingConnects` + `finishIfIdle()` exist so a disconnect that is immediately
+  followed by a connect does **not** `stopSelf()` the service out from under the
+  queued connect. Only stop when `pendingConnects.get() == 0`.
+- **`XrayManager.start()` must NOT short-circuit when a core is already running.**
+  The v6.4 line `if (isRunning) return true` meant switching configs reported
+  success while never loading the new JSON. `start()` now always `stopLocked()`s,
+  then `waitForLocalPortsFree()` (a `ServerSocket` bind test on both local ports),
+  then builds a **fresh** `CoreController` and resets `totalUp`/`totalDown`.
+- **`TProxyService` tracks native run-state.** Use `startBlocking(configPath, fd)`
+  and `stopAndWait(timeoutMs)`; never call the raw JNI `TProxyStartService` /
+  `TProxyStopService` from new code. Two native tunnel sessions must never coexist
+  on the same (or a closed) fd. `stopAndWait` **must not hold `nativeLock` while
+  polling** — holding it deadlocks against the `startBlocking` thread that has to
+  observe the flag change in order to exit.
+
+### The teardown ORDER is load-bearing
+
+```
+teardownSession(reason):
+  1. interrupt watchdog + stats threads
+  2. TProxyService.stopAndWait(2500); tunnelThread interrupt + join(600)
+  3. xray.stop()
+  4. tunInterface?.close()
+  5. unregisterNetworkCallback(); releaseWakeLock()
+```
+
+Stopping the core before the native tunnel leaves hev writing into a dead SOCKS
+port; closing the TUN first makes the native tunnel spin on `EBADF`. Do not
+reorder these steps.
+
+### NO connection-time or connection-type limits. Ever.
+
+The requirement is explicit: «هیچ محدودیتی روی زمان اتصال یا نوع اتصال نباشد».
+
+- There is **no session timer** anywhere. Do not add one, not even for "safety".
+- `TUN_MAX_RESTARTS = 20` bounds **consecutive failures only**, and the counter
+  **resets after 120 s of healthy life**. Never convert it into a lifetime cap.
+- `policy.handshake` is **16** (raised from 12). Lowering it re-breaks slow ISPs.
+
+### The live gate must never be stricter than the list ping
+
+If the connect gate is tighter than the ping, a node shows a green ping and then
+fails to connect — the reported «پینگ می‌دهد ولی وصل نمی‌شود» bug.
+
+- `CONNECT_VERIFY_BUDGET_MS = 14_000` (list-ping budget is 12 s), with a ramped
+  inter-probe gap (300 → 900 ms), and from attempt 3 a `probeDevicePath()` success
+  is also accepted — a real packet through the local SOCKS5 proxy is *stronger*
+  evidence than a latency echo, so it must count.
+- `Pinger` keeps its **sustain check**: after the initial samples pass, wait
+  `SUSTAIN_PAUSE_MS` (700 ms) and probe once more. Some nodes accept the first
+  burst and then die; without this they show green and fail on connect. Do not
+  remove it as an "optimisation".
+
+### `tcpcongestion: bbr` is a FIX, not a tweak
+
+In `XrayConfigBuilder`'s per-outbound `sockopt`: `bbr` paces from measured
+bandwidth × RTT instead of treating loss as congestion. On lossy Iranian mobile
+links a loss-based controller collapses the window — the reported "first three
+Instagram videos load, then it freezes". Keep `bbr`, and keep
+`sockopt.domainStrategy = UseIPv4` next to it.
+
+### `QrCode.kt` — the interleave formula, and why it must never change back
+
+`shortBlockLen` is the **TOTAL** length of a short block: data codewords **plus**
+that block's EC codewords.
+
+```kotlin
+val shortBlockLen = rawCount / numBlocks          // CORRECT (v6.5)
+// NOT (rawCount - totalEcc) / numBlocks          // WRONG  (v6.4)
+```
+
+v6.4 subtracted the EC codewords here **and again** when deriving each block's
+data length, so every block was `eccLen` codewords short and only part of the
+matrix was written — e.g. **44 of 70** codewords for a 41-char URL. The finder
+patterns, timing patterns and format bits were all perfect, so the result *looked*
+like a flawless QR code, but every scanner failed Reed–Solomon and gave up
+silently. That is the whole «بارکد کار نمی‌کند» bug.
+
+- The `require(idx == rawCount)` guard at the end of `interleave()` is a
+  **regression tripwire**. Never weaken it to a `Log.w`: rendering nothing is
+  correct, rendering a dead barcode is not.
+- `QrCode.kt` stays **dependency-free** (no ZXing, no Play Services).
+- The QR payload is the operator's link **verbatim**. Do **not** re-wrap it in
+  `professorvpn://get?bt=1`: `DownloadsActivity` is exported with a `BROWSABLE`
+  filter for that scheme, so a scan could be swallowed by the app instead of
+  opening the visitor's browser — which defeats the entire purpose.
+- ECC is `QUARTILE` with a `MEDIUM` fallback for long links.
+
+### The panel preview uses the APP's encoder
+
+`adminpanel/qrcode.js` is a port of `QrCode.kt`, interleave fix included. Do
+**not** swap in a QR web service or a third-party library:
+
+1. the panel could then show a working barcode while the app draws a broken one
+   (exactly the v6.4 situation), and
+2. the panel is served from GitHub Pages and must keep working with **zero**
+   third-party requests.
+
+If you change `QrCode.kt`, change `qrcode.js` in the same commit. Same rule for
+`normalizeLink()` (JS) and `QrLinkConfig.normalizedUrl()` (Kotlin): scheme-less
+input gets `https://`, other schemes (`tg:`, `mailto:`) pass through untouched.
+
+---
+
 ## 6. ADMIN PANEL (`adminpanel/`)
 
 - `index.html` + `app.js`, fully client-side, no server.
