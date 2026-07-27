@@ -51,7 +51,47 @@ class NeonVpnService : VpnService() {
     @Volatile private var stopping = false
     private var currentServer: ServerConfig? = null
 
-    private var startThread: Thread? = null
+    // ───────────────────────── v6.5 — THE SESSION STATE MACHINE ──────────────
+    //
+    // THE BUG THIS FIXES (the user's #1 complaint): *"the first connect works,
+    // but the 2nd / 3rd don't. It shows a ping, I press connect, and the app
+    // won't attach to it."* — plus its twin, *"I can't switch to another config
+    // without closing the app."*
+    //
+    // v6.4 tore a session down on a DETACHED `vpn-stop` thread and started the
+    // next one on a DETACHED `vpn-start` thread, with no handshake between them.
+    // A user tapping connect right after disconnect (or picking another config)
+    // therefore raced the previous teardown:
+    //
+    //   • the old Xray core still owned local ports 10808/10809, so the new
+    //     core's startLoop() failed to bind → "connect does nothing";
+    //   • the native tun2socks session table from the old session was still
+    //     alive, so even when the core came up no packets moved;
+    //   • XrayManager.start() saw a stale `isRunning` and returned "already
+    //     started" without ever loading the NEW config → the old server stayed
+    //     in use, i.e. the "stale cache" the user described.
+    //
+    // From v6.5 EVERY connect and EVERY disconnect is a task on ONE single
+    // worker thread ([sessionExecutor]), so they can never overlap: a connect
+    // task always begins by fully draining the previous session (native tunnel
+    // drained + core stopped + ports confirmed free + TUN fd closed) before it
+    // brings the new one up. A [generation] counter lets a newer tap instantly
+    // supersede an in-flight one, so mashing the button is harmless.
+    private val sessionExecutor = java.util.concurrent.Executors.newSingleThreadExecutor { r ->
+        Thread(r, "vpn-session").apply { isDaemon = true }
+    }
+
+    /** Bumped on every connect/disconnect request; stale tasks abort themselves. */
+    @Volatile private var generation = 0
+    private val genLock = Any()
+
+    /** How many connect requests are queued — stops us calling stopSelf() when
+     *  the user is actually switching to another config. */
+    private val pendingConnects = java.util.concurrent.atomic.AtomicInteger(0)
+
+    /** Generation of the session that is currently LIVE (used by long-running
+     *  helper threads so a leftover thread never touches a newer session). */
+    @Volatile private var sessionEpoch = -1
 
     // --- mobile-data bypass: track the real underlying network ---
     // On WiFi, addDisallowedApplication(self) is enough to keep the core's own
@@ -88,6 +128,11 @@ class NeonVpnService : VpnService() {
                 val name = try { ConfigStore(this).getSelected()?.remark } catch (_: Throwable) { null }
                     ?: "Professor VPN"
                 goForeground(name, "Connecting…")
+                // v6.5 — a start intent while a tunnel is up is a CONFIG SWITCH,
+                // not a duplicate. startVpnAsync() handles both by queueing on the
+                // session thread; it never drops the request on the floor the way
+                // v6.4's `if (running) return` did.
+                broadcastState(STATE_CONNECTING, name)
                 startVpnAsync()
             }
         }
@@ -113,32 +158,65 @@ class NeonVpnService : VpnService() {
         }
     }
 
-    /** Kicks off the (heavy) connect sequence on a dedicated worker thread. */
+    /**
+     * v6.5 — queue a CONNECT on the single session thread.
+     *
+     * Unlike v6.4 this NEVER early-returns on `running`. A connect request while
+     * a tunnel is already up is the legitimate "switch to another config"
+     * gesture the user explicitly asked for, and it is handled by tearing the
+     * old session down inside the queued task and bringing the new one up — all
+     * on one thread, so nothing can interleave.
+     */
     private fun startVpnAsync() {
-        if (running) return
-        if (startThread?.isAlive == true) return
-        stopping = false
-        startThread = thread(name = "vpn-start", isDaemon = true) {
+        val myGen = synchronized(genLock) { ++generation }
+        pendingConnects.incrementAndGet()
+        // Signal every running loop (watchdog / stats / tun keep-alive) from the
+        // OLD session to wind down immediately, so they don't fight the new one.
+        stopping = true
+        running = false
+        sessionExecutor.execute {
             try {
-                startVpn()
+                if (isStale(myGen)) {
+                    Log.i(TAG, "connect gen=$myGen superseded before it started")
+                    return@execute
+                }
+                // Drain whatever was running before (idempotent, blocking, safe).
+                teardownSession("switching")
+                if (isStale(myGen)) return@execute
+                stopping = false
+                startVpn(myGen)
             } catch (e: Throwable) {
-                Log.e(TAG, "startVpnAsync crash guard: ${e.message}", e)
+                Log.e(TAG, "connect gen=$myGen crash guard: ${e.message}", e)
                 broadcastState(STATE_ERROR, e.message ?: "error")
-                try { cleanup() } catch (_: Throwable) {}
-                try { stopForegroundCompat(); stopSelf() } catch (_: Throwable) {}
+                try { teardownSession("error") } catch (_: Throwable) {}
+                finishIfIdle()
+            } finally {
+                pendingConnects.decrementAndGet()
             }
         }
     }
 
-    private fun startVpn() {
-        if (running) return
+    /** True when a newer connect/disconnect request has superseded this task. */
+    private fun isStale(myGen: Int): Boolean = synchronized(genLock) { generation != myGen }
 
+    /**
+     * Stops the service ONLY when no other connect is queued. Without this
+     * guard a rapid disconnect→connect would call stopSelf() from the first
+     * task and kill the service while the second was still connecting — another
+     * face of the "2nd connect doesn't work" bug.
+     */
+    private fun finishIfIdle() {
+        if (pendingConnects.get() > 0) return
+        try { stopForegroundCompat() } catch (_: Throwable) {}
+        try { stopSelf() } catch (_: Throwable) {}
+    }
+
+    private fun startVpn(myGen: Int) {
         val store = ConfigStore(this)
         val server = store.getSelected()
         if (server == null) {
             broadcastState(STATE_ERROR, "No config selected")
-            stopForegroundCompat()
-            stopSelf()
+            finishIfIdle()
             return
         }
         currentServer = server
@@ -157,29 +235,41 @@ class NeonVpnService : VpnService() {
             //    this worker thread so a slow asset extraction never blocks the UI.
             emitProgress(15, "Preparing engine")
             xray.init()
+            if (isStale(myGen)) return
 
             // 1) Establish the TUN device first.
             emitProgress(30, "Opening tunnel")
             tunInterface = establishTun() ?: run {
                 broadcastState(STATE_ERROR, "Failed to establish VPN interface")
-                cleanup()
-                stopForegroundCompat()
-                stopSelf()
+                teardownSession("no-tun")
+                finishIfIdle()
                 return
             }
+            if (isStale(myGen)) return
 
             // 2) Start the real Xray core with the generated config.
             emitProgress(50, "Connecting core")
             val json = XrayConfigBuilder.build(server)
             Log.d(TAG, "Xray config:\n$json")
-            val ok = xray.start(json)
+            // v6.5 — ONE retry on a bind failure. On a very fast reconnect the
+            // previous core's listener sockets can still be in TIME_WAIT for a
+            // few hundred ms; XrayManager already waits for them, but a single
+            // retry makes a hostile-timing device recover instead of showing the
+            // user "connect did nothing".
+            var ok = xray.start(json)
+            if (!ok && !isStale(myGen)) {
+                Log.w(TAG, "core start failed — one retry after draining")
+                xray.stop()
+                Thread.sleep(600)
+                ok = xray.start(json)
+            }
             if (!ok) {
                 broadcastState(STATE_ERROR, "Core failed to start")
-                cleanup()
-                stopForegroundCompat()
-                stopSelf()
+                teardownSession("core-fail")
+                finishIfIdle()
                 return
             }
+            if (isStale(myGen)) return
 
             // Give the core a brief moment to actually bind the SOCKS inbound
             // before we probe it / tun2socks starts hammering it (prevents a
@@ -195,24 +285,55 @@ class NeonVpnService : VpnService() {
             // a cold-but-good tunnel is never falsely rejected. NO extra "real
             // bytes" gate (that over-aggressive v5.2 check false-rejected good
             // servers and is exactly what we're removing).
+            // ── v6.5 — "IF IT PINGS, IT CONNECTS" ────────────────────────────
+            //
+            // The user's rule: *a config that shows a ping MUST connect.* In v6.4
+            // it often didn't, and the reason was that the list ping and this
+            // gate were two different measurements with two different budgets:
+            //
+            //   • the list ping (Pinger) allows a 12 s per-config budget, takes
+            //     up to 4 samples and accepts anything under 8 s;
+            //   • this gate allowed a total of 8 s and only 4 attempts, spaced
+            //     500 ms apart, on a tunnel that was 450 ms old.
+            //
+            // A Reality/XTLS node behind Iranian DPI routinely needs 3-6 s for
+            // its FIRST handshake through a brand-new TUN. So the list said
+            // "180 ms, green" and this gate said "Server not responding" — the
+            // exact bug reported. v6.5 gives the live gate a budget at least as
+            // generous as the list ping (CONNECT_VERIFY_BUDGET_MS), probes with a
+            // short ramp instead of a fixed sleep, AND accepts a successful
+            // DEVICE-PATH probe as proof of life too, so a node that answers on
+            // the SOCKS inbound but happens to miss the core's own measureDelay
+            // is no longer thrown away.
             emitProgress(80, "Verifying")
             var health = -1L
             run {
-                val deadline = System.currentTimeMillis() + 8000
+                val deadline = System.currentTimeMillis() + CONNECT_VERIFY_BUDGET_MS
                 var attempts = 0
-                while (System.currentTimeMillis() < deadline && attempts < 4) {
+                var gap = 300L
+                while (System.currentTimeMillis() < deadline && !isStale(myGen)) {
                     attempts++
                     val d = try { xray.measureDelay() } catch (_: Throwable) { -1L }
-                    if (d in 1..15000) { health = d; break }
-                    try { Thread.sleep(500) } catch (_: InterruptedException) { break }
+                    if (d in 1..CONNECT_VERIFY_MAX_MS) { health = d; break }
+                    // Second chance on the real device path — the same chain the
+                    // user's apps use. If THAT answers, the tunnel works, full
+                    // stop, regardless of what the core's own probe said.
+                    if (attempts >= 3 && probeDevicePath()) {
+                        health = CONNECT_VERIFY_MAX_MS / 2   // real, unmeasured-but-alive
+                        Log.i(TAG, "health check: core probe missed but DEVICE PATH is alive")
+                        break
+                    }
+                    try { Thread.sleep(gap) } catch (_: InterruptedException) { break }
+                    gap = (gap + 200L).coerceAtMost(900L)
                 }
+                Log.i(TAG, "health check finished after $attempts attempt(s), delay=$health")
             }
-            if (health !in 1..15000) {
+            if (isStale(myGen)) return
+            if (health !in 1..CONNECT_VERIFY_MAX_MS) {
                 Log.w(TAG, "post-connect health check failed (delay=$health) — server can't proxy")
                 broadcastState(STATE_ERROR, "Server not responding — pick another")
-                cleanup()
-                stopForegroundCompat()
-                stopSelf()
+                teardownSession("unhealthy")
+                finishIfIdle()
                 return
             }
             Log.i(TAG, "health check OK: ${health}ms")
@@ -225,8 +346,9 @@ class NeonVpnService : VpnService() {
             // "connected but no traffic"). Order matters here.
             running = true
             isTunnelUp = true
+            sessionEpoch = myGen
             emitProgress(92, "Routing traffic")
-            startTun2Socks(tunInterface!!.fd)
+            startTun2Socks(tunInterface!!.fd, myGen)
 
             emitProgress(100, "Connected")
             broadcastState(STATE_CONNECTED, server.remark)
@@ -238,10 +360,11 @@ class NeonVpnService : VpnService() {
             Log.i(TAG, "VPN connected via ${server.protocol} ${server.address}:${server.port}")
         } catch (e: Throwable) {
             Log.e(TAG, "startVpn error: ${e.message}", e)
-            broadcastState(STATE_ERROR, e.message ?: "error")
-            cleanup()
-            stopForegroundCompat()
-            stopSelf()
+            if (!isStale(myGen)) {
+                broadcastState(STATE_ERROR, e.message ?: "error")
+                teardownSession("exception")
+                finishIfIdle()
+            }
         }
     }
 
@@ -391,29 +514,47 @@ class NeonVpnService : VpnService() {
         activeUnderlying = null
     }
 
-    private fun startTun2Socks(fd: Int) {
+    private fun startTun2Socks(fd: Int, myGen: Int) {
         val configFile = File(filesDir, "hev-socks5-tunnel.yaml")
         configFile.writeText(buildHevConfig())
 
-        tunnelThread = thread(name = "tun2socks", isDaemon = true) {
+        tunnelThread = thread(name = "tun2socks-$myGen", isDaemon = true) {
             // v4.2 — if the native tunnel ever returns unexpectedly while the
             // session is still meant to be up (a rare native hiccup on weak
-            // devices), restart it instead of leaving traffic black-holed. A
-            // small bounded retry loop keeps the TUN ⇄ SOCKS bridge alive without
-            // ever crashing the process.
+            // devices), restart it instead of leaving traffic black-holed.
+            //
+            // v6.5 — the retry loop is now bounded by the SESSION GENERATION as
+            // well as `running`, and it goes through TProxyService.startBlocking()
+            // which refuses to overlap two native sessions. Previously a stale
+            // keep-alive thread from a PREVIOUS session could wake up and call
+            // TProxyStartService with an OLD (already closed) fd right after the
+            // user connected to a new config — which wedged the fresh tunnel and
+            // is a direct cause of "the 2nd connect shows connected but nothing
+            // loads". A generation check makes that impossible.
+            //
+            // The restart budget is also generous now (RESTARTS) and resets after
+            // a long healthy run, because a bounded 3 was a hidden LIMIT on
+            // session lifetime — the user demanded no limits of any kind.
             var restarts = 0
-            while (running && !stopping && restarts <= 3) {
-                try {
-                    // Blocks until TProxyStopService is called.
-                    TProxyService.TProxyStartService(configFile.absolutePath, fd)
-                } catch (e: Throwable) {
-                    Log.e(TAG, "tun2socks stopped: ${e.message}")
-                }
-                if (!running || stopping) break
+            var lastStart = System.currentTimeMillis()
+            while (running && !stopping && !isStale(myGen)) {
+                lastStart = System.currentTimeMillis()
+                val ran = TProxyService.startBlocking(configFile.absolutePath, fd)
+                if (!ran) Log.e(TAG, "tun2socks refused to start (gen=$myGen)")
+                if (!running || stopping || isStale(myGen)) break
+                // A session that lived a long time then ended is a transient
+                // native hiccup, not a broken config — forgive the budget so a
+                // multi-hour connection is never capped.
+                if (System.currentTimeMillis() - lastStart > 120_000L) restarts = 0
                 restarts++
+                if (restarts > TUN_MAX_RESTARTS) {
+                    Log.e(TAG, "tun2socks restarted $restarts times — letting the watchdog take over")
+                    break
+                }
                 Log.w(TAG, "tun2socks returned while connected — restarting (#$restarts)")
-                try { Thread.sleep(300) } catch (_: InterruptedException) { break }
+                try { Thread.sleep(300L * restarts.coerceAtMost(5)) } catch (_: InterruptedException) { break }
             }
+            Log.i(TAG, "tun2socks keep-alive loop for gen=$myGen exited")
         }
     }
 
@@ -485,12 +626,13 @@ class NeonVpnService : VpnService() {
      * resolve, the UI simply keeps the hostname-derived guess.
      */
     private fun resolveExitIdentityAsync(server: ServerConfig) {
+        val gen = sessionEpoch
         thread(name = "exit-ip", isDaemon = true) {
             var attempt = 0
             while (running && !stopping && attempt < 4) {
                 attempt++
                 try { Thread.sleep(if (attempt == 1) 1200L else 4000L) } catch (_: InterruptedException) { return@thread }
-                if (!running || stopping) return@thread
+                if (!running || stopping || isStale(gen)) return@thread
                 val body = try { xray.fetchTraceThroughTunnel() } catch (_: Throwable) { null }
                 if (body.isNullOrBlank()) continue
 
@@ -525,7 +667,8 @@ class NeonVpnService : VpnService() {
 
     // ------------------------------------------------------------ stats pump
     private fun startStatsPump() {
-        statsThread = thread(name = "stats", isDaemon = true) {
+        val gen = sessionEpoch
+        statsThread = thread(name = "stats-$gen", isDaemon = true) {
             var totalUp = 0L
             var totalDown = 0L
             var lastTs = System.currentTimeMillis()
@@ -552,10 +695,10 @@ class NeonVpnService : VpnService() {
             var lastTunTx = -1L
             var lastTunRx = -1L
 
-            while (running && !stopping) {
+            while (running && !stopping && !isStale(gen)) {
                 try {
                     Thread.sleep(1000)
-                    if (!running || stopping) break
+                    if (!running || stopping || isStale(gen)) break
 
                     // Per-tick delta bytes straight from the core (resetting
                     // counters), accumulated here into true totals.
@@ -649,7 +792,8 @@ class NeonVpnService : VpnService() {
      * failures eventually surface an error so the user can switch servers.
      */
     private fun startWatchdog() {
-        watchdogThread = thread(name = "watchdog", isDaemon = true) {
+        val gen = sessionEpoch
+        watchdogThread = thread(name = "watchdog-$gen", isDaemon = true) {
             var consecutiveFailures = 0
             var reviveAttempts = 0
             // v6.4 — end-to-end (device-path) stall detection counters.
@@ -664,7 +808,7 @@ class NeonVpnService : VpnService() {
             // health probe removes that self-inflicted disruption.
             try { Thread.sleep(20000) } catch (_: InterruptedException) { return@thread }
 
-            while (running && !stopping) {
+            while (running && !stopping && !isStale(gen)) {
                 try {
                     // v4.2 — RESILIENT watchdog. While healthy we poll at the base
                     // cadence; after a failure we wait the next step in the
@@ -675,7 +819,7 @@ class NeonVpnService : VpnService() {
                             (consecutiveFailures - 1).coerceIn(0, WATCHDOG_BACKOFF_MS.lastIndex)
                         ]
                     Thread.sleep(waitMs)
-                    if (!running || stopping) break
+                    if (!running || stopping || isStale(gen)) break
 
                     // v4.2 — if there's currently NO usable physical network
                     // (airplane mode, tunnel/metro dead-zone, screen-off doze with
@@ -784,17 +928,28 @@ class NeonVpnService : VpnService() {
 
                     // try to revive the core in place (same config, no user tap)
                     val srv = currentServer
-                    if (srv != null) {
+                    if (srv != null && !isStale(gen)) {
                         try {
                             reviveAttempts++
+                            // v6.5 — XrayManager.start() now stops any previous
+                            // core and waits for 10808/10809 to be free, so the
+                            // revived core can actually bind. In v6.4 this path
+                            // hit `if (isRunning) return true` half the time and
+                            // "revived" nothing at all — one of the reasons a
+                            // stalled session never really recovered on its own.
                             xray.stop()
                             Thread.sleep(300)
+                            if (isStale(gen)) break
                             val json = XrayConfigBuilder.build(srv)
                             val ok = xray.start(json)
                             if (ok) {
                                 Thread.sleep(500)
                                 val again = try { xray.measureDelay() } catch (_: Throwable) { -1L }
                                 if (again in 1..8000) {
+                                    // A fresh core means a fresh SOCKS inbound, so
+                                    // the native bridge must be re-pointed at it or
+                                    // traffic keeps going nowhere.
+                                    restartTun2Socks()
                                     consecutiveFailures = 0
                                     reviveAttempts = 0
                                     Log.i(TAG, "watchdog: core revived (${again}ms)")
@@ -817,9 +972,9 @@ class NeonVpnService : VpnService() {
                     if (consecutiveFailures >= MAX_HARD_FAILURES) {
                         Log.e(TAG, "watchdog: giving up after $consecutiveFailures failures")
                         broadcastState(STATE_ERROR, "Connection lost — pick another server")
-                        cleanup()
-                        stopForegroundCompat()
-                        stopSelf()
+                        // v6.5 — hand the teardown to the session thread so it can
+                        // never collide with a connect the user is making right now.
+                        requestStop(userInitiated = false)
                         break
                     }
                 } catch (_: InterruptedException) {
@@ -859,7 +1014,7 @@ class NeonVpnService : VpnService() {
                 readTimeout = 6000
                 requestMethod = "GET"
                 useCaches = false
-                setRequestProperty("User-Agent", "ProfessorVPN/6.4 (Android)")
+                setRequestProperty("User-Agent", "ProfessorVPN/6.5 (Android)")
                 setRequestProperty("Connection", "close")
             }
             try {
@@ -887,13 +1042,19 @@ class NeonVpnService : VpnService() {
      */
     private fun restartTun2Socks() {
         val fd = try { tunInterface?.fd } catch (_: Throwable) { null } ?: return
+        val gen = sessionEpoch
         Log.w(TAG, "restarting tun2socks bridge to clear a stalled session table")
-        try { TProxyService.TProxyStopService() } catch (_: Throwable) {}
+        // v6.5 — WAIT for the native loop to actually unwind before starting a
+        // new one. v6.4 fired stop() and immediately re-started 250 ms later,
+        // which frequently produced two overlapping native sessions on the same
+        // fd; the second one then carried no traffic at all, so the "self-heal"
+        // could make the freeze permanent instead of fixing it.
+        TProxyService.stopAndWait(2500)
         try { tunnelThread?.interrupt() } catch (_: Throwable) {}
         tunnelThread = null
-        try { Thread.sleep(250) } catch (_: InterruptedException) { return }
-        if (!running || stopping) return
-        try { startTun2Socks(fd) } catch (e: Throwable) {
+        try { Thread.sleep(150) } catch (_: InterruptedException) { return }
+        if (!running || stopping || isStale(gen)) return
+        try { startTun2Socks(fd, gen) } catch (e: Throwable) {
             Log.w(TAG, "tun2socks restart failed: ${e.message}")
         }
     }
@@ -914,9 +1075,6 @@ class NeonVpnService : VpnService() {
     }
 
     // ----------------------------------------------------------------- stop
-
-    /** Guards against two overlapping STOP requests racing each other. */
-    @Volatile private var stopThread: Thread? = null
 
     /**
      * v6.3 — STOP BUTTON RELIABILITY FIX.
@@ -949,7 +1107,21 @@ class NeonVpnService : VpnService() {
      *      flight is a no-op instead of a race, and `stopSelf()` is called from
      *      a `finally` so the service dies even if a native call throws.
      */
-    private fun stopVpn() {
+    private fun stopVpn() = requestStop(userInitiated = true)
+
+    /**
+     * v6.5 — the disconnect half of the session state machine.
+     *
+     * The v6.3 fix (flip state first, tear down on a worker) solved the frozen
+     * STOP button but created the reconnect race, because the worker was a
+     * throwaway thread that a following connect knew nothing about. v6.5 keeps
+     * the instant UI response AND removes the race by queueing the teardown on
+     * the SAME single session thread every connect uses. Ordering is therefore
+     * guaranteed: disconnect → connect always runs disconnect to completion
+     * first, no matter how fast the user taps.
+     */
+    private fun requestStop(userInitiated: Boolean) {
+        val myGen = synchronized(genLock) { ++generation }
         // (1) Make the stop visible IMMEDIATELY — before any blocking work.
         stopping = true
         running = false
@@ -957,43 +1129,70 @@ class NeonVpnService : VpnService() {
         emitProgress(0, "Disconnected")
         broadcastState(STATE_DISCONNECTED, "")
 
-        // (3) Idempotent: ignore a second tap while a teardown is in flight.
-        if (stopThread?.isAlive == true) return
-
-        // (2) Blocking native teardown OFF the main thread.
-        stopThread = thread(name = "vpn-stop", isDaemon = true) {
+        // (2) Blocking native teardown on the serialised session thread.
+        sessionExecutor.execute {
             try {
-                cleanup()
+                teardownSession(if (userInitiated) "user-stop" else "watchdog-stop")
             } catch (e: Throwable) {
-                Log.w(TAG, "stopVpn cleanup: ${e.message}")
+                Log.w(TAG, "stop teardown: ${e.message}")
             } finally {
-                // The service MUST die even if a native call misbehaved.
-                try { stopForegroundCompat() } catch (_: Throwable) {}
-                try { stopSelf() } catch (_: Throwable) {}
+                // Only die if the user isn't already connecting to another config.
+                if (!isStale(myGen)) finishIfIdle() else Log.i(TAG, "stop gen=$myGen superseded — service kept alive")
             }
         }
     }
 
-    private fun cleanup() {
+    /**
+     * v6.5 — FULL, ORDERED, BLOCKING teardown of the current session.
+     *
+     * Must only ever be called from the session thread. The order matters and
+     * every step WAITS for completion, which is precisely what v6.4 lacked:
+     *
+     *   1. stop the observer loops (watchdog / stats) so nothing re-spins the
+     *      core behind our back;
+     *   2. drain the NATIVE tunnel and wait for its loop to unwind — until this
+     *      returns the old session still owns the fd and the session table;
+     *   3. stop the Xray core and wait for local ports 10808/10809 to be free;
+     *   4. only THEN close the TUN fd (closing it earlier makes the still-running
+     *      native loop spin on a dead descriptor);
+     *   5. release the network callback and wake lock.
+     *
+     * Fully idempotent — calling it twice is harmless.
+     */
+    private fun teardownSession(reason: String) {
+        Log.i(TAG, "teardownSession($reason)")
         running = false
-        stopping = true
         isTunnelUp = false
+
+        // 1) silence the loops
         try { watchdogThread?.interrupt() } catch (_: Throwable) {}
         watchdogThread = null
         try { statsThread?.interrupt() } catch (_: Throwable) {}
         statsThread = null
-        try {
-            TProxyService.TProxyStopService()
-        } catch (_: Throwable) {
-        }
+
+        // 2) native tunnel down + CONFIRMED unwound
+        try { TProxyService.stopAndWait(2500) } catch (_: Throwable) {}
         try { tunnelThread?.interrupt() } catch (_: Throwable) {}
+        try { tunnelThread?.join(600) } catch (_: Throwable) {}
         tunnelThread = null
-        xray.stop()
+
+        // 3) core down; XrayManager.stop() + the port wait inside start() ensure
+        //    the next core can bind cleanly.
+        try { xray.stop() } catch (e: Throwable) { Log.w(TAG, "xray.stop: ${e.message}") }
+
+        // 4) now it is safe to release the descriptor
         try { tunInterface?.close() } catch (_: Exception) {}
         tunInterface = null
+
+        // 5) housekeeping
         unregisterNetworkCallback()
         releaseWakeLock()
+        Log.i(TAG, "teardownSession($reason) complete")
     }
+
+    /** Legacy alias kept for readability at call sites that mean "tear it all down". */
+    @Suppress("unused")
+    private fun cleanup() = teardownSession("cleanup")
 
     override fun onDestroy() {
         // If the OS killed us while connected (e.g. low-memory) the watchdog may
@@ -1004,12 +1203,21 @@ class NeonVpnService : VpnService() {
             liveState = STATE_DISCONNECTED
             liveInfo = ""
         }
-        // v6.3 — when the STOP path already spawned the worker teardown, do NOT
-        // run cleanup() again here: onDestroy is on the MAIN thread and a second
-        // pass through the blocking native calls is exactly what used to hang the
-        // UI after pressing STOP. The worker thread finishes the job.
-        if (stopThread?.isAlive != true) {
-            try { cleanup() } catch (e: Throwable) { Log.w(TAG, "onDestroy cleanup: ${e.message}") }
+        // v6.5 — NEVER run the blocking teardown on the MAIN thread. onDestroy is
+        // main-thread; doing native stops here is exactly what used to hang the
+        // UI after pressing STOP. We queue it on the session thread (which is a
+        // daemon, so it cannot keep the process alive) and let it finish there.
+        running = false
+        stopping = true
+        try {
+            sessionExecutor.execute {
+                try { teardownSession("onDestroy") } catch (e: Throwable) {
+                    Log.w(TAG, "onDestroy teardown: ${e.message}")
+                }
+            }
+            sessionExecutor.shutdown()
+        } catch (e: Throwable) {
+            Log.w(TAG, "onDestroy queue: ${e.message}")
         }
         super.onDestroy()
     }
@@ -1206,6 +1414,24 @@ class NeonVpnService : VpnService() {
          */
         private const val PATH_CHECK_EVERY = 5
         private val WATCHDOG_BACKOFF_MS = longArrayOf(2000L, 4000L, 8000L, 16000L, 32000L)
+
+        /**
+         * v6.5 — the live connect verification budget, deliberately AT LEAST as
+         * generous as [com.neonvpn.app.config.Pinger.PER_CONFIG_BUDGET_MS]. This
+         * is what makes "it pings, therefore it connects" true: the gate that
+         * decides whether a connect succeeds can no longer be stricter than the
+         * gate that decided the config was pingable in the first place.
+         */
+        private const val CONNECT_VERIFY_BUDGET_MS = 14_000L
+        private const val CONNECT_VERIFY_MAX_MS = 15_000L
+
+        /**
+         * v6.5 — tun2socks keep-alive restart budget. v6.4 stopped after 3, which
+         * silently capped how long a session could survive native hiccups. The
+         * counter now also RESETS after any session that lived over two minutes,
+         * so there is no effective limit on connection time — as required.
+         */
+        private const val TUN_MAX_RESTARTS = 20
 
         // v4.2 — only surface a "connection lost" after this many SUSTAINED hard
         // failures (each already double-probed + a core re-spin attempt) while a

@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
 <meta name="robots" content="noindex,nofollow" />
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230b0810'/%3E%3Ccircle cx='16' cy='16' r='7' fill='%23a855f7'/%3E%3Ccircle cx='16' cy='16' r='3' fill='%23050507'/%3E%3C/svg%3E" />
-<title>Professor VPN · Control 4.6</title>
+<title>Professor VPN · Control 6.5</title>
 <style>
   :root{
     --bg:#040406; --bg2:#070709; --panel:rgba(18,16,26,.72); --panel2:rgba(26,22,38,.66);
@@ -141,7 +141,7 @@
   <div class="glass login-card">
     <div class="logo-dot"></div>
     <div class="brand">PROFESSOR·VPN</div>
-    <div class="sub">CONTROL · 4.6</div>
+    <div class="sub">CONTROL · 6.5</div>
     <label>Username</label>
     <input id="lg-user" type="text" autocomplete="username" />
     <label>Password</label>
@@ -166,6 +166,7 @@
       <div class="tab" data-tab="home">🏠 صفحه اصلی</div>
       <div class="tab" data-tab="donate">💎 دونیت</div>
       <div class="tab" data-tab="downloads">⬇️ لینک‌های دانلود</div>
+      <div class="tab" data-tab="qrlink">🔳 لینک پشت بارکد</div>
       <div class="tab" data-tab="notice">🔔 اعلان‌ها</div>
       <div class="tab" data-tab="preview">📱 پیش‌نمایش</div>
       <div class="tab" data-tab="publish">🚀 انتشار</div>
@@ -245,7 +246,7 @@
         <h3>۳) تنظیمات عمومی برنامه</h3>
         <p class="hint">آخرین نسخه منتشرشده برنامه (برای اطلاع‌رسانی آپدیت).</p>
         <label>آخرین نسخه APK</label>
-        <input id="hm-apk" placeholder="4.6" />
+        <input id="hm-apk" placeholder="6.5" />
       </div>
     </section>
 
@@ -334,6 +335,49 @@
       </div>
     </section>
 
+    <!-- ============ QR / BARCODE LINK (v6.5) ============ -->
+    <section id="tab-qrlink" class="hidden">
+      <div class="card">
+        <h3>لینک پشت بارکد</h3>
+        <p class="hint">
+          لینکی که در کادر زیر می‌گذارید، پشت بارکد (QR) صفحه‌ی «لینک‌های دانلود» برنامه قرار می‌گیرد.
+          هر کسی آن بارکد را با دوربین گوشی اسکن کند، <b>مرورگرش همین لینک را باز می‌کند</b>.
+          دکمه‌ی «ساخت بارکد» پیش‌نمایش را همین‌جا می‌سازد؛ برای اعمال در برنامه، در تب «🚀 انتشار» دکمه‌ی انتشار را بزنید.
+        </p>
+
+        <label class="switch">
+          <input type="checkbox" id="qr-enabled" checked /><span class="track"></span>
+        </label>
+        <span class="small" style="margin-inline-start:8px">فعال بودن لینک پشت بارکد</span>
+
+        <div class="row" style="margin-top:12px">
+          <div class="col">
+            <label>لینک</label>
+            <input id="qr-url" type="url" dir="ltr" placeholder="https://example.com/download" />
+          </div>
+          <div class="col" style="max-width:160px;display:flex;align-items:flex-end">
+            <button class="btn btn-primary btn-block" id="btn-make-qr">🔳 ساخت بارکد</button>
+          </div>
+        </div>
+
+        <label>توضیح زیر بارکد (اختیاری)</label>
+        <input id="qr-caption" placeholder="مثلاً: برای دانلود، بارکد را اسکن کنید" />
+
+        <div id="qr-status" class="small" style="margin-top:10px"></div>
+      </div>
+
+      <div class="card">
+        <h3>پیش‌نمایش بارکد</h3>
+        <p class="hint">این تصویر دقیقاً همان بارکدی است که در برنامه ساخته می‌شود. می‌توانید همین حالا با گوشی دیگری اسکنش کنید و مطمئن شوید لینک درست باز می‌شود.</p>
+        <div id="qr-preview-wrap" style="display:flex;flex-direction:column;align-items:center;gap:10px">
+          <canvas id="qr-canvas" width="320" height="320"
+                  style="background:#fff;border-radius:12px;padding:10px;max-width:100%;height:auto"></canvas>
+          <div id="qr-preview-url" class="small" dir="ltr" style="word-break:break-all;text-align:center"></div>
+          <a id="qr-download" class="btn btn-ghost btn-sm hidden" download="professorvpn-barcode.png">⬇️ دانلود تصویر بارکد</a>
+        </div>
+      </div>
+    </section>
+
     <!-- ============ NOTIFICATIONS ============ -->
     <section id="tab-notice" class="hidden">
       <div class="card">
@@ -405,6 +449,11 @@
 </div>
 
 <div class="toast" id="toast"></div>
+<!-- v6.5 — barcode engine. Loaded BEFORE app.js because refreshQrPreview()
+     needs window.PanelQr the moment a config is applied to the form. It is a
+     direct port of the app's QrCode.kt (interleave fix included), so the code
+     previewed here is byte-identical to the one the app renders. -->
+<script src="qrcode.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

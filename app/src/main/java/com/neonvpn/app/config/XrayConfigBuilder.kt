@@ -108,7 +108,28 @@ object XrayConfigBuilder {
                     // reclaimed fast enough that the pool can never fill up.
                     // Half-open directions are released promptly for the same
                     // reason (a stalled half-open socket is pure dead weight).
-                    put("handshake", 12)
+                    // ── v6.5 — NO LIMIT ON CONNECTION TIME OR TYPE ────────────
+                    // Explicit user requirement: *absolutely no limitation on
+                    // connection time or connection type — no limits at all.*
+                    //
+                    // `connIdle` is an IDLE reaper, not a session cap: it only
+                    // closes a connection that has carried NO bytes for 120s, and
+                    // the live tunnel is never idle (keep-alives alone reset it).
+                    // So a download or a call can run for hours or days. There is
+                    // deliberately NO `handshake`-style ceiling anywhere that
+                    // bounds total session duration, and no per-user speed,
+                    // byte-count or protocol quota in this config — the policy
+                    // block below is purely a resource reaper, which is what keeps
+                    // the tunnel from stalling.
+                    //
+                    // v6.5 raises `handshake` 12 → 16 for one reason: it is the
+                    // budget for the FIRST TLS/Reality handshake through a cold
+                    // tunnel, and on the worst Iranian mobile links 12s was
+                    // occasionally short — a config that pinged fine then failed
+                    // its very first real request. It costs nothing when the link
+                    // is healthy (a good handshake finishes in well under a
+                    // second) and it is another part of "if it pings, it works".
+                    put("handshake", 16)
                     put("connIdle", 120)
                     put("uplinkOnly", 4)
                     put("downlinkOnly", 4)
@@ -562,6 +583,19 @@ object XrayConfigBuilder {
         //   • tcpUserTimeout 100s → 30s. Same reasoning: a socket the kernel
         //     cannot drain in 30s is not "slow", it is wedged, and keeping it
         //     alive only blocks the replacement connection from being made.
+        // v6.5 — WORKS ON EVERY ISP / EVERY CONNECTION TYPE.
+        //   • `domainStrategy: UseIPv4` is added here at the SOCKET level (not
+        //     just in the DNS block). Some Iranian carriers hand out a v6
+        //     address on a link with no working v6 route; a dial that picks the
+        //     v6 answer then stalls for the full connect timeout before falling
+        //     back — the "works on wifi, dead on SIM data" report. Pinning the
+        //     dialer to v4 removes that class of failure entirely.
+        //   • `tcpcongestion: bbr` where the kernel supports it. On lossy mobile
+        //     links classic CUBIC collapses its window on every random loss,
+        //     which is exactly the "packet loss / lag / video keeps cutting"
+        //     symptom; BBR is loss-tolerant and holds throughput steady. Xray
+        //     silently ignores the option when the kernel lacks BBR, so this is
+        //     safe on every device.
         stream.put("sockopt", JSONObject().apply {
             put("tcpKeepAliveIdle", 30)
             put("tcpKeepAliveInterval", 10)
@@ -570,6 +604,8 @@ object XrayConfigBuilder {
             put("tcpMptcp", false)
             put("mark", 0)
             put("tcpUserTimeout", 30_000)
+            put("domainStrategy", "UseIPv4")
+            put("tcpcongestion", "bbr")
             if (sec == "tls" || sec == "reality") {
                 put("tcpFastOpen", true)
                 put("fragment", JSONObject().apply {

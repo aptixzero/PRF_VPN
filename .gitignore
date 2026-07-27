@@ -21,3 +21,6 @@ build_log3.txt
 .buildenv/
 local.properties
 .androidenv/
+
+# Sandbox-only QR verification harness (test oracle, never shipped)
+.qrtest/

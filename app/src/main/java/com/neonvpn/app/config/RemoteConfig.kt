@@ -71,7 +71,13 @@ data class RemoteConfig(
      * that it came from an admin panel.
      */
     val notice: NoticeConfig = NoticeConfig(),
-    /** v6.3 — newest published APK version string, e.g. "6.3". */
+    /**
+     * v6.5 — "لینک پشت بارکد". The link the operator typed into the panel's new
+     * barcode section; the app encodes exactly this into the QR code on the
+     * Download Links page so a scan opens it in the scanner's browser.
+     */
+    val qrLink: QrLinkConfig = QrLinkConfig(),
+    /** v6.3 — newest published APK version string, e.g. "6.5". */
     val latestApkVersion: String = ""
 ) {
 
@@ -192,6 +198,7 @@ data class RemoteConfig(
             homeBanner = HomeBanner(),
             downloadLinks = DownloadLinksConfig(),
             notice = NoticeConfig(),
+            qrLink = QrLinkConfig(),
             latestApkVersion = ""
         )
 
@@ -247,6 +254,13 @@ data class RemoteConfig(
                         o.optJSONObject("notice") ?: o.optJSONObject("notification")
                             ?: o.optJSONObject("notifications"),
                         def.notice
+                    ),
+                    // v6.5 — the barcode link. Accept a couple of key spellings
+                    // so the panel and any hand-edited config stay compatible.
+                    qrLink = QrLinkConfig.parse(
+                        o.optJSONObject("qrLink") ?: o.optJSONObject("qrcode")
+                            ?: o.optJSONObject("barcode"),
+                        def.qrLink
                     ),
                     latestApkVersion = o.optString("latestApkVersion", def.latestApkVersion)
                 )
