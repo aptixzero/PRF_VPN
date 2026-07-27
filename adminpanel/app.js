@@ -5,7 +5,7 @@
  * ONLY in the browser's localStorage — never committed.
  *
  * Publishing model:
- *   - app_config.json is written to  aptixzero/PRF_VPN @ adminpanel/app_config.json
+ *   - app_config.json is written to  aptixzero/my_prFF_vP_N @ adminpanel/app_config.json
  *     (a PUBLIC path) so the Android app can fetch it via raw.githubusercontent.
  *   - The panel HTML/JS itself lives in the PRIVATE repo.
  *   - Uploaded banner images are committed as binary blobs into
