@@ -43,8 +43,15 @@ object FeedCache {
         val cache = Cache(dir, CACHE_SIZE_BYTES)
         return OkHttpClient.Builder()
             .cache(cache)
-            .connectTimeout(7, TimeUnit.SECONDS)
-            .readTimeout(10, TimeUnit.SECONDS)
+            // v6.6 — resolve through Cloudflare DoH and NEVER through a proxy, for
+            // the same reason as every other fetch in the app: the real blocker on
+            // an Iranian ISP is DNS poisoning of the origin, so an encrypted lookup
+            // plus a direct, certificate-validated connection is both safer and
+            // faster than handing the request to a third-party mirror.
+            .dns(com.neonvpn.app.net.CfDns)
+            .proxy(java.net.Proxy.NO_PROXY)
+            .connectTimeout(6, TimeUnit.SECONDS)
+            .readTimeout(9, TimeUnit.SECONDS)
             .followRedirects(true)
             // Force a 6 h max-age + ETag revalidation on every cached response even
             // when the origin omits Cache-Control (raw.githubusercontent.com does).

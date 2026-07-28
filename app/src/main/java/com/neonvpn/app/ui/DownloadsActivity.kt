@@ -123,6 +123,25 @@ class DownloadsActivity : BaseActivity() {
         // whether it may overwrite the hand-off prompt.
         arrivedFromScan = intent?.data?.getQueryParameter("bt") == "1"
 
+        // ── v6.7 — A SCAN MUST END UP IN THE BROWSER, EVEN ON A PHONE THAT
+        //           ALREADY HAS THIS APP INSTALLED ───────────────────────────
+        //
+        // The brief: «زمانی که اون بارکد رو اسکن کرد باید خودکار منتقل بشه به
+        // مرورگر» — a scan must take the person to the link, not copy it.
+        //
+        // We register a `professorvpn://get` deep link, so on a device that has
+        // the app, the system can hand a scanned code to US instead of to a
+        // browser. If that link carries a destination we must not swallow it:
+        // we forward it to the browser immediately, which is what the scanner
+        // would have done on a phone without the app. Behaviour is now identical
+        // on both, which is the entire point of the requirement.
+        val handOff = intent?.data?.let { d ->
+            d.getQueryParameter("url") ?: d.getQueryParameter("link") ?: d.getQueryParameter("to")
+        }?.trim().orEmpty()
+        if (handOff.isNotBlank()) {
+            openInBrowser(handOff)
+        }
+
         bind(RemoteConfigStore.current())
 
         // v6.5 — tapping the barcode opens the same link in a browser, so the
@@ -232,16 +251,52 @@ class DownloadsActivity : BaseActivity() {
     private fun buildQrPayload(): String {
         val cfg = RemoteConfigStore.current()
 
-        // 1) the operator's explicit barcode link wins, used EXACTLY as given.
+        // 1) the operator's explicit barcode link wins, used EXACTLY as given
+        //    (only normalised to a scannable scheme — see normalizedUrl()).
         val panelLink = cfg.qrLink.normalizedUrl()
         if (cfg.qrLink.enabled && panelLink.isNotBlank()) return panelLink
 
-        // 2) otherwise the first published download link, unmodified.
+        // 2) otherwise the first published download link.
+        //
+        //    v6.7 — THIS IS THE «باید خودکار منتقل بشه به مرورگر» FIX.
+        //
+        //    v6.6 encoded this link RAW. Operators routinely paste
+        //    `example.com/app.apk` or `www.example.com/x` with no scheme, and a
+        //    QR payload without a scheme is, to every phone camera, just a
+        //    string of TEXT. A camera that decodes text offers "copy" — it has
+        //    no way to know it is a web address — which is precisely the
+        //    reported behaviour: the scan copied the link instead of opening the
+        //    browser. Nothing was wrong with the barcode; the payload simply was
+        //    not a URL.
+        //
+        //    Running it through the same normaliser the panel link uses makes it
+        //    an explicit `https://…`, which every scanner recognises and offers
+        //    to OPEN. The operator's address is otherwise untouched: no query
+        //    parameters, no `bt=1`, no tracking.
         val first = cfg.downloadLinks.items.firstOrNull()?.url?.trim().orEmpty()
-        if (first.isNotBlank()) return first
+        if (first.isNotBlank()) return asBrowsableUrl(first)
 
         // 3) last resort: the public releases page.
         return DEFAULT_LANDING
+    }
+
+    /**
+     * v6.7 — force a bare address into a form a phone camera will treat as a
+     * LINK rather than as text. Anything that already carries an explicit scheme
+     * (https:, http:, tg:, mailto:, …) is the operator's deliberate choice and
+     * passes through untouched.
+     *
+     * Deliberately identical in behaviour to
+     * [com.neonvpn.app.config.QrLinkConfig.normalizedUrl] so both barcode
+     * sources produce the same kind of payload.
+     */
+    private fun asBrowsableUrl(raw: String): String {
+        val s = raw.trim()
+        if (s.isBlank()) return s
+        val lower = s.lowercase()
+        if (lower.startsWith("http://") || lower.startsWith("https://")) return s
+        if (Regex("^[a-z][a-z0-9+.\\-]*:").containsMatchIn(lower)) return s
+        return "https://$s"
     }
 
     private fun appVersion(): String = runCatching {
@@ -443,13 +498,55 @@ class DownloadsActivity : BaseActivity() {
         }
     }
 
+    /**
+     * v6.7 — OPEN THE LINK IN A BROWSER, FOR REAL.
+     *
+     * The v6.6 version was a bare `runCatching { startActivity(ACTION_VIEW) }`.
+     * When that threw — which it does on Android 11+ whenever no matching
+     * activity is VISIBLE to us, and it did, because the manifest declared no
+     * `<queries>` entry for web intents — the failure was swallowed in silence.
+     * The user tapped or scanned, absolutely nothing happened, and the only
+     * thing that ever seemed to work was the COPY button. That is the whole of
+     * the reported «باید خودکار منتقل بشه به مرورگر» bug on the app side.
+     *
+     * The fix is three ordered attempts, each strictly more permissive, and an
+     * honest fallback instead of silence:
+     *
+     *   1. Plain `ACTION_VIEW`. The normal path, now that the manifest
+     *      `<queries>` block lets us see browsers again. The system opens the
+     *      user's default browser (or its app-link owner).
+     *   2. `ACTION_VIEW` marked `CATEGORY_BROWSABLE` and flagged
+     *      `FLAG_ACTIVITY_REQUIRE_DEFAULT`-free, wrapped in a CHOOSER. A chooser
+     *      is resolved by the system itself rather than by us, so it succeeds in
+     *      the locked-down cases where a direct resolve does not.
+     *   3. Last resort: copy to the clipboard AND tell the user we did, so the
+     *      link is never simply lost.
+     *
+     * `FLAG_ACTIVITY_NEW_TASK` is kept so the browser lands in its own task and
+     * the back button returns here rather than into a browser stack.
+     */
     private fun openInBrowser(link: String) {
-        runCatching {
-            startActivity(
-                Intent(Intent.ACTION_VIEW, Uri.parse(link))
-                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            )
-        }
+        val url = asBrowsableUrl(link)
+        if (url.isBlank()) return
+        val uri = runCatching { Uri.parse(url) }.getOrNull() ?: return
+
+        // 1) direct view
+        val direct = Intent(Intent.ACTION_VIEW, uri)
+            .addCategory(Intent.CATEGORY_BROWSABLE)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        if (runCatching { startActivity(direct); true }.getOrDefault(false)) return
+
+        // 2) let the SYSTEM resolve it via a chooser
+        val chooser = runCatching {
+            Intent.createChooser(Intent(Intent.ACTION_VIEW, uri), null)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }.getOrNull()
+        if (chooser != null &&
+            runCatching { startActivity(chooser); true }.getOrDefault(false)
+        ) return
+
+        // 3) never a dead end
+        copyToClipboard(url)
     }
 
     private companion object {

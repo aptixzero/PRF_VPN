@@ -10,10 +10,7 @@ import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
-import java.net.HttpURLConnection
-import java.net.URL
 import java.util.concurrent.atomic.AtomicInteger
-import javax.net.ssl.HttpsURLConnection
 import kotlin.coroutines.coroutineContext
 
 /**
@@ -270,22 +267,26 @@ object ConfigFetcher {
             .map { it.first }
     }
 
-    /** Cheap HEAD request to read `Last-Modified`; returns epoch millis or -1. */
+    /**
+     * Cheap HEAD request to read `Last-Modified`; returns epoch millis or -1.
+     *
+     * v6.6 — issued through the shared proxy-free, DoH-resolving client so the
+     * freshness probe uses the SAME resolved address and the SAME pooled
+     * connection the subsequent GET will use. Previously this opened its own
+     * `HttpURLConnection` via the (poisoned) system resolver, so on a filtered
+     * link the HEAD failed, every source reported "unknown freshness", and the
+     * ordering logic that is supposed to prefer the freshest feed was blind.
+     */
     private fun lastModifiedMillis(urlStr: String): Long {
         return try {
-            val conn = (URL(urlStr).openConnection() as HttpURLConnection).apply {
-                connectTimeout = 2000
-                readTimeout = 2000
-                instanceFollowRedirects = true
-                requestMethod = "HEAD"
-                setRequestProperty("User-Agent", "v2rayNG/1.8.5 (Android)")
-            }
-            try {
-                conn.responseCode
-                val lm = conn.getHeaderFieldDate("Last-Modified", -1L)
-                if (lm > 0) lm else conn.getHeaderFieldDate("Date", -1L)
-            } finally {
-                try { conn.disconnect() } catch (_: Throwable) {}
+            val req = okhttp3.Request.Builder()
+                .url(urlStr)
+                .head()
+                .header("User-Agent", "ProfessorVPN/6.6 (Android)")
+                .build()
+            com.neonvpn.app.net.DirectHttp.client.newCall(req).execute().use { resp ->
+                val lm = resp.headers.getDate("Last-Modified")?.time ?: -1L
+                if (lm > 0) lm else (resp.headers.getDate("Date")?.time ?: -1L)
             }
         } catch (_: Throwable) {
             -1L
@@ -318,6 +319,25 @@ object ConfigFetcher {
      *  a set of edge-cached CDNs and generic reverse proxies. The first mirror
      *  that returns a usable body wins, so the configs can still be pulled even
      *  when the origin is unreachable. */
+    /**
+     * v6.6 — **NO PROXIES.** Origin + GitHub's own CDN, nothing else.
+     *
+     * REMOVED: `ghproxy.net`, `gh.api.99988866.xyz`, `cors.isomorphic-git.org`,
+     * `r.jina.ai`, `api.allorigins.win`. They are third-party reverse proxies that
+     * saw every config before the user did, they are rate-limited, and they are
+     * themselves throttled/blocked from Iran — so each one had to time out (~9 s)
+     * before the next was tried. Five of those in series is most of a minute
+     * wasted per source, which is a large part of why fetching felt so slow.
+     *
+     * REPLACED BY: encrypted Cloudflare-DoH resolution in
+     * [com.neonvpn.app.net.CfDns]. The dominant block on Iranian ISPs is DNS
+     * poisoning, so resolving over DoH and dialling the true origin directly makes
+     * the ORIGIN work in exactly the case that previously needed a proxy — with no
+     * third party able to read or alter the configs.
+     *
+     * `cdn.jsdelivr.net` remains as the one fallback: not a proxy, but GitHub's
+     * immutable content CDN serving the same repository file from its own edge.
+     */
     private fun mirrorCandidates(urlStr: String): List<String> {
         val out = LinkedHashSet<String>()
         out.add(urlStr)
@@ -330,58 +350,19 @@ object ConfigFetcher {
             if (parts.size >= 4) {
                 val user = parts[0]; val repo = parts[1]; val branch = parts[2]
                 val path = parts.drop(3).joinToString("/")
-                // jsDelivr CDN (very reliable inside Iran, edge-cached)
                 out.add("https://cdn.jsdelivr.net/gh/$user/$repo@$branch/$path")
-                out.add("https://fastly.jsdelivr.net/gh/$user/$repo@$branch/$path")
-                out.add("https://gcore.jsdelivr.net/gh/$user/$repo@$branch/$path")
-                // statically.io mirror
-                out.add("https://cdn.statically.io/gh/$user/$repo/$branch/$path")
             }
         }
-
-        // Generic reverse-proxy / CORS mirrors that work for ANY origin host
-        // (GitHub raw, mudfish.net pastes, etc.). These keep config-fetching
-        // working even when the origin host itself is blocked on the user's ISP.
-        out.add("https://ghproxy.net/$urlStr")
-        out.add("https://gh.api.99988866.xyz/$urlStr")
-        out.add("https://cors.isomorphic-git.org/$urlStr")
-        // r.jina.ai mirrors arbitrary URLs through a reachable edge.
-        out.add("https://r.jina.ai/$urlStr")
-        // allorigins raw passthrough (URL-encoded target).
-        out.add("https://api.allorigins.win/raw?url=" + urlEncode(urlStr))
 
         return out.toList()
     }
 
-    private fun urlEncode(s: String): String = try {
-        java.net.URLEncoder.encode(s, "UTF-8")
-    } catch (_: Throwable) { s }
-
-    private fun fetchOne(urlStr: String): String? {
-        val url = URL(urlStr)
-        val conn = (url.openConnection() as HttpURLConnection).apply {
-            // Tightened from 12s/15s: with parallel fetching we'd rather abandon a
-            // stalled mirror quickly and fall through to the next candidate than
-            // block a download slot for 15 seconds on a dead host.
-            connectTimeout = 7000
-            readTimeout = 9000
-            instanceFollowRedirects = true
-            requestMethod = "GET"
-            setRequestProperty("User-Agent", "v2rayNG/1.8.5 (Android)")
-            setRequestProperty("Accept", "*/*")
-        }
-        if (conn is HttpsURLConnection) {
-            // best-effort; default trust managers are fine for public CDNs
-        }
-        return try {
-            val code = conn.responseCode
-            if (code !in 200..299) {
-                Log.w(TAG, "HTTP $code for $urlStr")
-                return null
-            }
-            conn.inputStream.bufferedReader().use { it.readText() }
-        } finally {
-            try { conn.disconnect() } catch (_: Throwable) {}
-        }
-    }
+    /**
+     * v6.6 — one shared, pooled, proxy-free client
+     * ([com.neonvpn.app.net.DirectHttp]): Cloudflare-DoH resolution, HTTP/2 and
+     * TLS session reuse, so parallel feed fetches share connections instead of
+     * paying a fresh handshake each.
+     */
+    private fun fetchOne(urlStr: String): String? =
+        com.neonvpn.app.net.DirectHttp.get(urlStr)
 }

@@ -210,7 +210,7 @@ class XrayManager(private val context: Context) {
      * possible (first endpoint that responds wins) and is what the health check
      * and the watchdog use. For the number the USER SEES, use [measureDelayStable].
      */
-    fun measureDelay(url: String = ProbeEndpoints.PRIMARY): Long {
+    fun measureDelay(url: String = ProbeEndpoints.INSTANT): Long {
         val c = controller ?: return -1
         val d0 = try { c.measureDelay(url) } catch (_: Throwable) { -1L }
         if (d0 in 1..15000) return d0
@@ -220,6 +220,27 @@ class XrayManager(private val context: Context) {
             if (d in 1..15000) return d
         }
         return -1
+    }
+
+    /**
+     * v6.6 — the ZERO-DNS liveness probe used by the connect gate.
+     *
+     * This is the measurement that removed the reported «۳۰ ثانیه صبر کردن».
+     * [measureDelay]'s old default was a NAMED host, so the very first probe
+     * after a connect had to resolve it — and on a cold tunnel that resolution is
+     * itself a full DoH round-trip through the brand-new outbound, commonly 2-4 s
+     * and up to 10 s when shaped. The gate paid that before it was allowed to say
+     * "Connected", and if it timed out it paid it AGAIN on the next attempt.
+     *
+     * Asking an IP literal removes the resolver from the path entirely, so the
+     * first proof of life typically lands in a few hundred milliseconds. It is
+     * the same real round-trip through the same live outbound — only the DNS step
+     * is gone.
+     */
+    fun measureDelayInstant(): Long {
+        val c = controller ?: return -1
+        val d = try { c.measureDelay(ProbeEndpoints.INSTANT) } catch (_: Throwable) { -1L }
+        return if (d in 1..15000) d else -1
     }
 
     /**
@@ -289,7 +310,7 @@ class XrayManager(private val context: Context) {
             readTimeout = 6000
             requestMethod = "GET"
             instanceFollowRedirects = true
-            setRequestProperty("User-Agent", "ProfessorVPN/6.5 (Android)")
+            setRequestProperty("User-Agent", "ProfessorVPN/6.6 (Android)")
             setRequestProperty("Accept", "*/*")
         }
         return try {
@@ -322,7 +343,10 @@ class XrayManager(private val context: Context) {
          * different route from the one the list measured — the "120 in the list,
          * 1000 after connecting" bug. NO Google anywhere in the app.
          */
-        private val HEALTH_PROBE_URLS = ProbeEndpoints.URLS
+        // v6.6 — the zero-DNS IP-literal endpoint is tried FIRST everywhere, so no
+        // probe in the app ever pays a resolver round-trip in the common case.
+        private val HEALTH_PROBE_URLS: List<String> =
+            (listOf(ProbeEndpoints.INSTANT) + ProbeEndpoints.URLS).distinct()
 
         private val initLock = Any()
         @Volatile private var initialized = false
@@ -345,5 +369,69 @@ class XrayManager(private val context: Context) {
                 -1
             }
         }
+
+        /**
+         * v6.6 — THE PAYLOAD VERDICT. The measurement that makes
+         * *"if it pings, it connects"* structurally true instead of merely hoped
+         * for.
+         *
+         * ─────────────────────────────────────────────────────────────────────
+         * WHY A LATENCY PROBE IS NOT ENOUGH (the «پینگ فیک» bug)
+         * ─────────────────────────────────────────────────────────────────────
+         * [measureConfigDelay] against a zero-byte 204 answers a very narrow
+         * question: "did ONE tiny request complete?" On a filtered link that is
+         * routinely YES for a node that is nonetheless useless, because Iranian
+         * DPI typically admits the first handshake of a flow and resets the
+         * *next* one, and because a node at its connection limit accepts one
+         * trivial request and then stops. Those nodes are exactly the ones that
+         * showed a healthy green number and then failed the moment the user
+         * tapped connect.
+         *
+         * ─────────────────────────────────────────────────────────────────────
+         * WHAT THIS DOES DIFFERENTLY
+         * ─────────────────────────────────────────────────────────────────────
+         * Every `measureOutboundDelay` call constructs its OWN core instance, so
+         * calling it here necessarily opens a **brand-new connection** — it
+         * cannot ride the warm path the latency samples shared. And the URLs
+         * below return a **real response body**, which the core reads to
+         * completion before returning a delay. So a success here proves two
+         * things at once, and they are the same two things the live connect path
+         * requires:
+         *
+         *   1. the node completed a FRESH handshake through DPI, and
+         *   2. actual payload bytes traversed the tunnel.
+         *
+         * The endpoints are ordered zero-DNS first ([ProbeEndpoints.INSTANT], an
+         * IP literal whose `/cdn-cgi/trace` body is a few hundred real bytes),
+         * then the Cloudflare speed edge with an explicit byte count for a
+         * heavier confirmation when a name lookup is affordable.
+         *
+         * @return true when real response bytes came back over a fresh connection.
+         */
+        fun measureConfigThroughput(configJson: String): Boolean {
+            for (url in PAYLOAD_URLS) {
+                val d = try {
+                    Libv2ray.measureOutboundDelay(configJson, url)
+                } catch (e: Throwable) {
+                    Log.w(TAG, "throughput probe failed on $url: ${e.message}")
+                    -1L
+                }
+                // A valid delay means the core completed the request AND read the
+                // response body — i.e. real bytes moved through the outbound.
+                if (d in 1..12_000) return true
+            }
+            return false
+        }
+
+        /**
+         * Probe URLs whose responses carry a REAL body (never a zero-byte 204),
+         * so completing one proves payload throughput rather than just a
+         * handshake. Zero-DNS endpoint first.
+         */
+        private val PAYLOAD_URLS: List<String> = listOf(
+            ProbeEndpoints.INSTANT,                                 // IP literal, ~350 B body
+            "https://speed.cloudflare.com/__down?bytes=32768",      // 32 KiB real download
+            ProbeEndpoints.TRACE_URL                                 // named edge, ~350 B body
+        )
     }
 }

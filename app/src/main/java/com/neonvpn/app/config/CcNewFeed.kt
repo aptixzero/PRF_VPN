@@ -6,8 +6,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import org.json.JSONObject
-import java.net.HttpURLConnection
-import java.net.URL
 
 /**
  * v4.0 CONFIG FEED — `aptixzero/con_new`.
@@ -26,9 +24,11 @@ import java.net.URL
  *    in SharedPreferences ([KEY_FILE_COUNT]) with a 24 h TTL. On API failure we
  *    fall back to the last cached value, or to [FALLBACK_FILE_COUNT] (= the live
  *    count at the time of the v3.8 implementation).
- *  • Each file is fetched through a CDN fallback chain (raw → jsDelivr → gitcdn)
- *    with an OkHttp-free HttpURLConnection (the project does not depend on OkHttp
- *    in this module; the on-disk OkHttp cache lives in [FeedCache]).
+ *  • v6.6 — Each file is fetched through a two-hop CDN chain (origin
+ *    raw.githubusercontent.com → GitHub's own cdn.jsdelivr.net). Both hops go out
+ *    over the shared, pooled, **proxy-free** client, with hostnames resolved by
+ *    Cloudflare DoH so a poisoned ISP resolver cannot hide the origin. The
+ *    third-party `gitcdn.link` forwarder that v6.5 used was removed.
  *
  * Lazy / bounded:
  *  • Only ONE file is held in memory at a time.
@@ -89,18 +89,18 @@ object CcNewFeed {
         if (cached > 0) cached else FALLBACK_FILE_COUNT
     }
 
-    /** Best-effort: count `configs_NNN.txt` entries in the repo tree. -1 on failure. */
+    /**
+     * Best-effort: count `configs_NNN.txt` entries in the repo tree. -1 on failure.
+     *
+     * v6.6 — routed through [com.neonvpn.app.net.DirectHttp], so the hostname is
+     * resolved by Cloudflare DoH (defeating ISP DNS poisoning of `api.github.com`)
+     * and the socket is opened with `Proxy.NO_PROXY` — no third-party forwarder
+     * ever sees the request, and connection reuse makes the repeat calls cheap.
+     */
     private fun discoverFileCount(): Int {
         return try {
             val u = "https://api.github.com/repos/$REPO/git/trees/$BRANCH"
-            val conn = (URL(u).openConnection() as HttpURLConnection).apply {
-                connectTimeout = 5000; readTimeout = 6000
-                instanceFollowRedirects = true
-                setRequestProperty("User-Agent", "ProfessorVPN/4.1")
-                setRequestProperty("Accept", "application/vnd.github+json")
-            }
-            if (conn.responseCode !in 200..299) return -1
-            val txt = conn.inputStream.bufferedReader().use { it.readText() }
+            val txt = com.neonvpn.app.net.DirectHttp.get(u) ?: return -1
             val arr = JSONObject(txt).optJSONArray("tree") ?: return -1
             val re = Regex("""^configs_(\d{3})\.txt$""")
             var maxIdx = -1
@@ -155,17 +155,25 @@ object CcNewFeed {
     }
 
     /**
-     * CDN fallback mirror chain for one file, in priority order:
-     *   1. raw.githubusercontent.com   (origin)
-     *   2. cdn.jsdelivr.net/gh         (edge-cached, survives DPI in Iran)
-     *   3. gitcdn.link/cdn             (secondary mirror)
+     * v6.6 — CDN fallback mirror chain for one file, in priority order:
+     *   1. raw.githubusercontent.com   (origin — reached DIRECTLY, resolved by
+     *      Cloudflare DoH inside [FeedCache], so ISP DNS poisoning can't hide it)
+     *   2. cdn.jsdelivr.net/gh         (GitHub's own immutable edge CDN)
+     *
+     * The v6.5 third mirror `gitcdn.link` was REMOVED in v6.6: it is a
+     * third-party request-forwarding service (i.e. a proxy), which the v6.6
+     * brief forbids outright — such hops are slow, frequently dead, and they
+     * terminate TLS on someone else's box. Each dead mirror also cost a full
+     * ~9 s connect timeout before the chain moved on, so dropping it makes the
+     * feed measurably FASTER as well as safer. The real blocker in Iran is DNS
+     * poisoning of the origin, and that is now solved at the resolver layer by
+     * [com.neonvpn.app.net.CfDns] rather than by borrowing someone's proxy.
      */
     fun mirrorChain(index: Int): List<String> {
         val name = fileName(index)
         return listOf(
             "https://raw.githubusercontent.com/$REPO/$BRANCH/$name",
-            "https://cdn.jsdelivr.net/gh/$REPO@$BRANCH/$name",
-            "https://gitcdn.link/cdn/$REPO/$BRANCH/$name"
+            "https://cdn.jsdelivr.net/gh/$REPO@$BRANCH/$name"
         )
     }
 }

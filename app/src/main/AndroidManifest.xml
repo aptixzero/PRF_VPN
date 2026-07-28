@@ -34,6 +34,28 @@
             <action android:name="android.intent.action.SEND" />
             <data android:mimeType="application/vnd.android.package-archive" />
         </intent>
+
+        <!-- ===== v6.7 — BROWSER VISIBILITY (the QR "it only copies the link"
+             bug) =====
+             Android 11 (API 30) introduced package visibility filtering: an app
+             can no longer see, resolve, or start an activity in another package
+             unless it declares that it wants to. Without this block
+             `queryIntentActivities` returns EMPTY for a web link and
+             `startActivity(ACTION_VIEW, https://…)` throws
+             ActivityNotFoundException on a strict device — which is exactly why
+             the barcode path degraded into "the link is just copied" instead of
+             opening a browser. Declaring the browsable web intent restores our
+             ability to see and launch the user's browser. -->
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <category android:name="android.intent.category.BROWSABLE" />
+            <data android:scheme="https" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <category android:name="android.intent.category.BROWSABLE" />
+            <data android:scheme="http" />
+        </intent>
     </queries>
 
     <application

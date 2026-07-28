@@ -191,10 +191,35 @@ object XrayConfigBuilder {
         //   • Cloudflare's DoH is listed first (and reachable by IP), matching
         //     the Cloudflare-only probe policy used everywhere else in v6.4.
         //   • The domestic resolver still serves Iranian domains directly.
+        // ── v6.6 — STATIC HOSTS: THE PROBE PATH NEEDS NO RESOLVER AT ALL ──────
+        //
+        // This is one of the two changes that removed the reported «۳۰ ثانیه صبر
+        // کردن» before a connection became usable.
+        //
+        // Every probe the app makes (connect gate, watchdog, live ping) used to
+        // begin by RESOLVING its endpoint's hostname. On a tunnel that is only
+        // milliseconds old, that resolution is itself a full DoH round-trip
+        // through the brand-new outbound — commonly 2-4 s, and far worse when the
+        // carrier shapes DoH. That cost was paid *before* the app was willing to
+        // report "Connected", and paid again on every retry.
+        //
+        // A `hosts` table answers those lookups from memory, instantly, with zero
+        // network traffic. Only Cloudflare's own documented anycast addresses are
+        // pinned (see [ProbeEndpoints.HOSTS]), TLS still validates against the
+        // real SNI, and user traffic is completely unaffected — this pins the
+        // PROBE endpoints only. Combined with the IP-literal probe URL, the
+        // resolver is out of the critical path entirely.
         root.put("dns", JSONObject().apply {
+            put("hosts", JSONObject().apply {
+                ProbeEndpoints.HOSTS.forEach { (host, ips) ->
+                    put(host, JSONArray().apply { ips.forEach { put(it) } })
+                }
+            })
             put("servers", JSONArray().apply {
-                put("https://1.1.1.1/dns-query")
-                put("https://1.0.0.1/dns-query")
+                // Cloudflare DoH by IP literal — the resolver itself never needs
+                // a resolver, so the first lookup of the session is not preceded
+                // by a bootstrap lookup.
+                ProbeEndpoints.DOH_URLS.forEach { put(it) }
                 put(JSONObject().apply {
                     put("address", "78.157.42.100")           // domestic resolver
                     put("port", 53)
@@ -204,8 +229,8 @@ object XrayConfigBuilder {
                     })
                     put("skipFallback", true)
                 })
-                put("1.1.1.1")
-                put("8.8.8.8")
+                // Plain-53 Cloudflare fallbacks, used only if DoH is shaped.
+                ProbeEndpoints.DNS_PLAIN.forEach { put(it) }
             })
             put("queryStrategy", "UseIPv4")
             put("disableCache", false)
@@ -378,6 +403,31 @@ object XrayConfigBuilder {
     fun buildPingConfig(cfg: ServerConfig): String {
         val root = JSONObject()
         root.put("log", JSONObject().apply { put("loglevel", "none") })
+        // ── v6.6 — THE PING CONFIG GETS THE SAME STATIC HOSTS AS THE LIVE ONE ─
+        //
+        // This is a large part of why the sweep is now fast. Each list ping builds
+        // a throwaway core, so every single probe used to pay a COLD DoH lookup for
+        // the probe hostname before it could even start measuring — several seconds
+        // per config, multiplied across the whole batch. Resolving those few hosts
+        // from a static table makes each probe a pure round-trip measurement.
+        //
+        // It also keeps the list ping and the live connection measuring the SAME
+        // thing (the invariant behind "if it pings, it connects"): if the live
+        // config resolved probes from a table and the ping config did not, the two
+        // numbers would once again describe different work.
+        root.put("dns", JSONObject().apply {
+            put("hosts", JSONObject().apply {
+                ProbeEndpoints.HOSTS.forEach { (host, ips) ->
+                    put(host, JSONArray().apply { ips.forEach { put(it) } })
+                }
+            })
+            put("servers", JSONArray().apply {
+                ProbeEndpoints.DOH_URLS.forEach { put(it) }
+                ProbeEndpoints.DNS_PLAIN.forEach { put(it) }
+            })
+            put("queryStrategy", "UseIPv4")
+            put("disableCache", false)
+        })
         root.put("outbounds", JSONArray().apply {
             put(buildProxyOutbound(cfg))
         })

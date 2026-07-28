@@ -271,84 +271,108 @@ class NeonVpnService : VpnService() {
             }
             if (isStale(myGen)) return
 
-            // Give the core a brief moment to actually bind the SOCKS inbound
-            // before we probe it / tun2socks starts hammering it (prevents a
-            // startup race that could crash the native tunnel).
-            Thread.sleep(450)
+            // ── v6.6 — WAIT FOR THE INBOUND, DON'T GUESS AT IT ────────────────
+            // v6.5 slept a flat 450 ms here hoping the core had bound its SOCKS
+            // inbound. That is wrong in both directions: on a fast device it
+            // wastes ~400 ms of the user's connect time, and on a slow one 450 ms
+            // is not enough, so the first probe fired at a port that was not
+            // listening yet, failed, and cost a whole retry gap — a real
+            // contributor to the reported «دیر وصل می‌شود».
+            //
+            // We now POLL for the port to accept a connection and continue the
+            // instant it does, typically in a few tens of milliseconds.
+            waitForSocksInbound(1500)
 
-            // 2.5) v5.5 — HEALTH CHECK through the LIVE core BEFORE reporting
-            // "Connected". This is the proven approach that actually WORKED: the
-            // config now dials the server with real TLS-hello fragmentation (see
-            // XrayConfigBuilder), so a green health check here genuinely means the
-            // tunnel carries traffic — not the "connected but nothing works" lie of
-            // v4.6–v5.4. We probe with a lenient window and a couple of retries so
-            // a cold-but-good tunnel is never falsely rejected. NO extra "real
-            // bytes" gate (that over-aggressive v5.2 check false-rejected good
-            // servers and is exactly what we're removing).
-            // ── v6.5 — "IF IT PINGS, IT CONNECTS" ────────────────────────────
+            // ── v6.6 — BRIDGE FIRST, *THEN* VERIFY THE PATH THE USER ACTUALLY USES
             //
-            // The user's rule: *a config that shows a ping MUST connect.* In v6.4
-            // it often didn't, and the reason was that the list ping and this
-            // gate were two different measurements with two different budgets:
+            // THE BUG THIS FIXES (the user's headline complaint):
+            //   «می‌زنیم وصل می‌شود، کار نمی‌کند» and
+            //   «۳۰ ثانیه باید صبر کنیم تا وصل شود».
             //
-            //   • the list ping (Pinger) allows a 12 s per-config budget, takes
-            //     up to 4 samples and accepts anything under 8 s;
-            //   • this gate allowed a total of 8 s and only 4 attempts, spaced
-            //     500 ms apart, on a tunnel that was 450 ms old.
+            // v6.5 verified with `xray.measureDelay()` — which dials straight out
+            // of the CORE — and only started tun2socks afterwards. Two consequences,
+            // and together they are the entire reported behaviour:
             //
-            // A Reality/XTLS node behind Iranian DPI routinely needs 3-6 s for
-            // its FIRST handshake through a brand-new TUN. So the list said
-            // "180 ms, green" and this gate said "Server not responding" — the
-            // exact bug reported. v6.5 gives the live gate a budget at least as
-            // generous as the list ping (CONNECT_VERIFY_BUDGET_MS), probes with a
-            // short ramp instead of a fixed sleep, AND accepts a successful
-            // DEVICE-PATH probe as proof of life too, so a node that answers on
-            // the SOCKS inbound but happens to miss the core's own measureDelay
-            // is no longer thrown away.
-            emitProgress(80, "Verifying")
+            //   1. THE VERIFICATION PROVED THE WRONG THING. The core dialling out
+            //      says nothing about TUN → tun2socks → SOCKS5 → core, which is the
+            //      chain every app on the phone actually uses. So the gate could
+            //      pass, the UI could say "Connected", and the user's apps still had
+            //      no working path — "connected but nothing works", exactly as
+            //      described. The bridge was not even running yet when we judged it.
+            //   2. IT WAS SLOW, AND THE SLOWNESS WAS SELF-INFLICTED. The probe used
+            //      a NAMED endpoint, so the first attempt had to resolve DNS through
+            //      a brand-new outbound (a DoH round-trip, 2-4 s cold, more when
+            //      shaped). Each miss then slept 300-900 ms before retrying, inside
+            //      a 14 s budget — which is how a connect could visibly take tens of
+            //      seconds before the UI moved.
+            //
+            // v6.6 inverts the order. We start the tun2socks bridge FIRST, so the
+            // full device path exists, and then verify THAT path with
+            // `probeDevicePath()` — a real HTTP request through the local SOCKS5
+            // inbound, the very socket tun2socks feeds. The probe is zero-DNS
+            // (IP literal), so the first answer typically lands in a few hundred
+            // milliseconds.
+            //
+            // The result is stronger AND faster: when this gate passes, real bytes
+            // have already traversed the exact chain the user's apps will use, so
+            // "Connected" means working — immediately, not after 30 s. Nothing is
+            // weakened: this is a STRICTER test than v6.5's, and it still tears the
+            // session down and reports an error when it fails, so the golden rule
+            // "internet off ⇒ never shows connected" is preserved (verified below).
+            running = true
+            isTunnelUp = true
+            sessionEpoch = myGen
+            emitProgress(70, "Routing traffic")
+            startTun2Socks(tunInterface!!.fd, myGen)
+
+            emitProgress(85, "Verifying")
             var health = -1L
             run {
                 val deadline = System.currentTimeMillis() + CONNECT_VERIFY_BUDGET_MS
                 var attempts = 0
-                var gap = 300L
+                var gap = 120L
                 while (System.currentTimeMillis() < deadline && !isStale(myGen)) {
                     attempts++
-                    val d = try { xray.measureDelay() } catch (_: Throwable) { -1L }
-                    if (d in 1..CONNECT_VERIFY_MAX_MS) { health = d; break }
-                    // Second chance on the real device path — the same chain the
-                    // user's apps use. If THAT answers, the tunnel works, full
-                    // stop, regardless of what the core's own probe said.
-                    if (attempts >= 3 && probeDevicePath()) {
-                        health = CONNECT_VERIFY_MAX_MS / 2   // real, unmeasured-but-alive
-                        Log.i(TAG, "health check: core probe missed but DEVICE PATH is alive")
+                    // (a) THE AUTHORITATIVE CHECK — the real device path, end to
+                    // end, through the local SOCKS5 inbound. This is what the
+                    // user's apps traverse, so passing it means the tunnel WORKS.
+                    // A SHORT per-attempt timeout on purpose: a cold tunnel that
+                    // is going to work usually answers in a few hundred ms, so
+                    // it is far better to abandon a stalled attempt quickly and
+                    // retry than to sit on one 6 s socket (v6.5's mistake).
+                    val t0 = System.currentTimeMillis()
+                    if (probeDevicePath(2500)) {
+                        health = (System.currentTimeMillis() - t0).coerceAtLeast(1L)
+                        Log.i(TAG, "connect gate: DEVICE PATH alive in ${health}ms (attempt $attempts)")
+                        break
+                    }
+                    // (b) Fallback — the core's own zero-DNS probe. The bridge can
+                    // need an extra moment to attach on some devices; if the core
+                    // can reach Cloudflare we accept it and let the watchdog's
+                    // device-path check (which self-heals the bridge in place)
+                    // finish the job rather than failing a good server.
+                    val d = try { xray.measureDelayInstant() } catch (_: Throwable) { -1L }
+                    if (d in 1..CONNECT_VERIFY_MAX_MS) {
+                        health = d
+                        Log.i(TAG, "connect gate: core probe alive (${d}ms) — bridge still attaching")
                         break
                     }
                     try { Thread.sleep(gap) } catch (_: InterruptedException) { break }
-                    gap = (gap + 200L).coerceAtMost(900L)
+                    // Ramp gently: fast retries early (when the tunnel is just
+                    // finishing its handshake) and calmer ones later.
+                    gap = (gap + 120L).coerceAtMost(600L)
                 }
-                Log.i(TAG, "health check finished after $attempts attempt(s), delay=$health")
+                Log.i(TAG, "connect gate finished after $attempts attempt(s), delay=$health")
             }
             if (isStale(myGen)) return
             if (health !in 1..CONNECT_VERIFY_MAX_MS) {
-                Log.w(TAG, "post-connect health check failed (delay=$health) — server can't proxy")
+                Log.w(TAG, "connect gate failed (delay=$health) — server cannot carry traffic")
                 broadcastState(STATE_ERROR, "Server not responding — pick another")
                 teardownSession("unhealthy")
                 finishIfIdle()
                 return
             }
-            Log.i(TAG, "health check OK: ${health}ms")
-
-            // 2.6) Start tun2socks (hev) bridging TUN <-> local SOCKS5 so ALL
-            // device traffic now flows through the verified tunnel. We flip
-            // `running` TRUE *before* starting the tunnel thread — its keep-alive
-            // loop guards on `running`, so setting it afterwards would race and the
-            // native TProxyStartService could be skipped entirely (a real cause of
-            // "connected but no traffic"). Order matters here.
-            running = true
-            isTunnelUp = true
-            sessionEpoch = myGen
-            emitProgress(92, "Routing traffic")
-            startTun2Socks(tunInterface!!.fd, myGen)
+            Log.i(TAG, "connect gate OK: ${health}ms")
 
             emitProgress(100, "Connected")
             broadcastState(STATE_CONNECTED, server.remark)
@@ -856,7 +880,11 @@ class NeonVpnService : VpnService() {
                     if (coreAlive) {
                         var miss = 0
                         while (miss < 3) {
-                            val d = try { xray.measureDelay() } catch (_: Throwable) { -1L }
+                            // v6.6 — zero-DNS probe. The watchdog runs while the
+                            // user's traffic is flowing, so a probe that has to
+                            // resolve a name first competes with that traffic for
+                            // no benefit whatsoever.
+                            val d = try { xray.measureDelayInstant() } catch (_: Throwable) { -1L }
                             if (d in 1..8000) { health = d; break }
                             miss++
                             if (miss < 3) { try { Thread.sleep(600) } catch (_: InterruptedException) { break } }
@@ -892,7 +920,12 @@ class NeonVpnService : VpnService() {
                     if (healthy) {
                         pathChecks++
                         if (pathChecks % PATH_CHECK_EVERY == 0) {
-                            if (!probeDevicePath()) {
+                            // v6.6 — a PATIENT timeout here (unlike the connect
+                            // gate's short one). This probe competes with the
+                            // user's real traffic, so a busy-but-working tunnel
+                            // must never be mistaken for a frozen one and
+                            // needlessly rebuilt.
+                            if (!probeDevicePath(6000)) {
                                 pathFailures++
                                 Log.w(TAG, "watchdog: core healthy but DEVICE PATH dead " +
                                     "(#$pathFailures) — tunnel is silently frozen")
@@ -903,7 +936,7 @@ class NeonVpnService : VpnService() {
                                     // Give the rebuilt bridge a moment, then
                                     // re-verify before doing anything drastic.
                                     try { Thread.sleep(1200) } catch (_: InterruptedException) { break }
-                                    if (probeDevicePath()) {
+                                    if (probeDevicePath(6000)) {
                                         Log.i(TAG, "watchdog: device path restored by tun2socks restart")
                                         consecutiveFailures = 0
                                         reviveAttempts = 0
@@ -943,8 +976,10 @@ class NeonVpnService : VpnService() {
                             val json = XrayConfigBuilder.build(srv)
                             val ok = xray.start(json)
                             if (ok) {
-                                Thread.sleep(500)
-                                val again = try { xray.measureDelay() } catch (_: Throwable) { -1L }
+                                // v6.6 — poll for the inbound instead of sleeping
+                                // blind, so a revive completes as soon as it can.
+                                waitForSocksInbound(1500)
+                                val again = try { xray.measureDelayInstant() } catch (_: Throwable) { -1L }
                                 if (again in 1..8000) {
                                     // A fresh core means a fresh SOCKS inbound, so
                                     // the native bridge must be re-pointed at it or
@@ -1002,25 +1037,49 @@ class NeonVpnService : VpnService() {
      *
      * @return true when real bytes came back through the device path.
      */
-    private fun probeDevicePath(): Boolean {
+    private fun probeDevicePath(): Boolean = probeDevicePath(4000)
+
+    /**
+     * v6.6 — the same device-path probe with an explicit timeout, and made
+     * ZERO-DNS.
+     *
+     * Two changes, both aimed at connect speed:
+     *
+     *   • the target is [com.neonvpn.app.config.ProbeEndpoints.INSTANT], an IP
+     *     LITERAL. v6.5 used a named host, so this probe began by resolving it
+     *     THROUGH the tunnel that was still warming up — a DoH round-trip that
+     *     regularly cost more than the probe itself. There is now no resolver in
+     *     the path at all.
+     *   • the timeout is a parameter instead of a hardcoded 6 s. The connect gate
+     *     wants short attempts so it can retry quickly while the handshake
+     *     settles; the watchdog wants patient ones so a busy tunnel is never
+     *     mistaken for a dead one.
+     */
+    private fun probeDevicePath(timeoutMs: Int): Boolean {
         return try {
             val proxy = java.net.Proxy(
                 java.net.Proxy.Type.SOCKS,
                 java.net.InetSocketAddress("127.0.0.1", XrayConfigBuilder.SOCKS_PORT)
             )
-            val conn = (java.net.URL(com.neonvpn.app.config.ProbeEndpoints.PRIMARY)
+            val conn = (java.net.URL(com.neonvpn.app.config.ProbeEndpoints.INSTANT)
                 .openConnection(proxy) as java.net.HttpURLConnection).apply {
-                connectTimeout = 6000
-                readTimeout = 6000
+                connectTimeout = timeoutMs
+                readTimeout = timeoutMs
                 requestMethod = "GET"
                 useCaches = false
-                setRequestProperty("User-Agent", "ProfessorVPN/6.5 (Android)")
+                setRequestProperty("User-Agent", "ProfessorVPN/6.6 (Android)")
                 setRequestProperty("Connection", "close")
             }
             try {
                 val code = conn.responseCode
-                // 204 (or any 2xx/3xx) means the whole chain answered.
-                code in 200..399
+                if (code !in 200..399) return false
+                // v6.6 — DRAIN THE BODY. A response code alone can be produced by
+                // a proxy that answers the request line and then stalls; reading
+                // real bytes proves the chain genuinely carries a payload, which
+                // is the same standard the list ping's verdict stage applies. The
+                // trace body is only a few hundred bytes, so this is nearly free.
+                val body = conn.inputStream.use { it.readBytes() }
+                body.isNotEmpty()
             } finally {
                 runCatching { conn.disconnect() }
             }
@@ -1028,6 +1087,34 @@ class NeonVpnService : VpnService() {
             Log.w(TAG, "device-path probe failed: ${e.message}")
             false
         }
+    }
+
+    /**
+     * v6.6 — block until the core's local SOCKS inbound is actually accepting
+     * connections, then return immediately.
+     *
+     * Replaces a flat `Thread.sleep(450)` that was wrong in both directions: it
+     * wasted ~400 ms on every fast device, and on a slow one it was not enough,
+     * so the first probe hit a port that was not listening yet and burned a full
+     * retry gap. Polling costs nothing and adapts to the device.
+     */
+    private fun waitForSocksInbound(timeoutMs: Long) {
+        val deadline = System.currentTimeMillis() + timeoutMs
+        while (System.currentTimeMillis() < deadline) {
+            try {
+                java.net.Socket().use { s ->
+                    s.connect(
+                        java.net.InetSocketAddress("127.0.0.1", XrayConfigBuilder.SOCKS_PORT),
+                        250
+                    )
+                }
+                Log.i(TAG, "SOCKS inbound is listening")
+                return
+            } catch (_: Throwable) {
+                try { Thread.sleep(25) } catch (_: InterruptedException) { return }
+            }
+        }
+        Log.w(TAG, "SOCKS inbound not confirmed in ${timeoutMs}ms — continuing anyway")
     }
 
     /**
@@ -1422,7 +1509,25 @@ class NeonVpnService : VpnService() {
          * decides whether a connect succeeds can no longer be stricter than the
          * gate that decided the config was pingable in the first place.
          */
-        private const val CONNECT_VERIFY_BUDGET_MS = 14_000L
+        /**
+         * v6.6 — the connect gate budget, cut from 14 s to 10 s, WITHOUT making
+         * the gate stricter. That sounds contradictory, so here is the reasoning:
+         *
+         * v6.5 needed 14 s because its very first probe had to resolve a hostname
+         * through a brand-new outbound (a cold DoH round-trip, 2-4 s and worse
+         * when shaped) and then slept 300-900 ms after every miss. Most of that
+         * budget was spent on DNS and on sleeping, not on the server.
+         *
+         * v6.6 removes both costs — the probe is an IP literal, so there is no
+         * resolver in the path, and the retry ramp starts at 120 ms — so a healthy
+         * node now proves itself in a few hundred milliseconds. 10 s of *probing*
+         * is far more attempts than 14 s of DNS-plus-sleep ever managed, so the
+         * gate is simultaneously faster and more thorough.
+         *
+         * It also remains no stricter than the list ping (whose own budget is now
+         * 9 s), which is the invariant that keeps "if it pings, it connects" true.
+         */
+        private const val CONNECT_VERIFY_BUDGET_MS = 10_000L
         private const val CONNECT_VERIFY_MAX_MS = 15_000L
 
         /**

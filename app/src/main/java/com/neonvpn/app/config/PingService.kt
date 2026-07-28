@@ -32,9 +32,27 @@ import kotlinx.coroutines.withTimeoutOrNull
  * `ConfigId -> PingStatus`, the single source of truth both tabs read. The map
  * is also mirrored into [PingStore] (per bucket) so it survives a full restart.
  *
+ * ─────────────────────────────────────────────────────────────────────────────
+ * v6.6 — TWO-WAVE SWEEP ("pings must be fast AND real")
+ * ─────────────────────────────────────────────────────────────────────────────
+ * The v6.5 sweep gave every config, alive or dead, one of only 4–8 deep-probe
+ * permits and let it hold that permit for its whole multi-second budget. Since a
+ * public feed is mostly dead entries, the user spent almost the entire sweep
+ * waiting on corpses. v6.6 splits the work by cost:
+ *
+ *   WAVE 1 — [TcpProbe], ~48 concurrent, ~300 ms to reject. Plain socket
+ *            connects: no native core, no TLS. Everything that refuses a
+ *            connection is finalised as Unreachable immediately. Reject-only, so
+ *            it can never invent a latency number.
+ *   WAVE 2 — the full [Pinger] pipeline, narrow gate, only for the minority that
+ *            actually answered. Every displayed number still comes from here.
+ *
+ * Same verdicts, a fraction of the wall-clock.
+ *
  * Concurrency / timing (per brief):
- *   • A [Semaphore] of [MAX_CONCURRENCY] (16) bounds simultaneous probes so a
- *     huge list can't open thousands of sockets at once.
+ *   • A [Semaphore] of [MAX_CONCURRENCY] bounds simultaneous DEEP probes so a
+ *     huge list can't spawn hundreds of native cores at once;
+ *     [TCP_GATE_CONCURRENCY] bounds the cheap wave far more generously.
  *   • Each config gets a [PRIMARY_TIMEOUT_MS] (2500 ms) attempt; on miss it is
  *     retried once with a tighter [RETRY_TIMEOUT_MS] (1500 ms).
  *   • After a full sweep, [BACKOFF_MS] (4000 ms) idle before the next is allowed
@@ -56,6 +74,24 @@ object PingService {
         val cores = Runtime.getRuntime().availableProcessors().coerceAtLeast(1)
         (cores + 2).coerceIn(4, 8)
     }
+
+    /**
+     * v6.6 — CONCURRENCY FOR THE CHEAP TCP PRE-GATE WAVE.
+     *
+     * [MAX_CONCURRENCY] above is deliberately tiny (4–8) because each DEEP probe
+     * spins up a throwaway native Xray core worth tens of MB of native heap —
+     * running many at once is what crashed low-RAM devices in v4.7.
+     *
+     * A [TcpProbe] check is a completely different animal: one non-blocking
+     * socket connect. It costs a file descriptor and a few hundred bytes, no
+     * native core, no TLS, no JSON. So it can safely run ~an order of magnitude
+     * wider, and that is precisely what makes the v6.6 sweep feel instant: the
+     * ~80 % of a public feed that is simply dead is rejected in one wide wave of
+     * short connects instead of each one squatting on a scarce deep-probe permit
+     * for its full multi-second budget.
+     */
+    val TCP_GATE_CONCURRENCY: Int = TcpProbe.MAX_CONCURRENCY
+
     const val PRIMARY_TIMEOUT_MS = 2_500L
     const val RETRY_TIMEOUT_MS = 1_500L
     const val BACKOFF_MS = 4_000L
@@ -83,6 +119,9 @@ object PingService {
 
     private val ioScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val gate = Semaphore(MAX_CONCURRENCY)
+
+    /** v6.6 — the wide gate for the cheap socket-only pre-gate wave. */
+    private val tcpGate = Semaphore(TCP_GATE_CONCURRENCY)
 
     private val _statuses = MutableStateFlow<Map<String, PingStatus>>(emptyMap())
     /** The single observable source of truth both tabs read (§4.4). */
@@ -227,18 +266,70 @@ object PingService {
             _sweep.value = SweepState(running = true, tested = 0, total = ordered.size)
 
             val tested = java.util.concurrent.atomic.AtomicInteger(0)
+            fun bump() {
+                val n = tested.incrementAndGet()
+                _sweep.value = SweepState(running = true, tested = n, total = ordered.size)
+            }
+
             withContext(Dispatchers.IO) {
-                // Bounded concurrency, but launches happen in list order so the
-                // first configs are probed first (the reported "config 240 is
-                // pinged before config 1" bug is fixed).
-                ordered.map { (key, cfg) ->
+                // ── WAVE 1 (v6.6): the WIDE, CHEAP TCP PRE-GATE ──────────────
+                // A public feed is mostly corpses. Discovering that with a deep
+                // probe means holding one of only 4–8 native-core permits for
+                // multiple seconds per dead node, which is exactly why the v6.5
+                // sweep crawled. Instead we first ask the cheapest possible
+                // question — "does anything accept a TCP connection on that
+                // address:port?" — ~48 at a time, ~300 ms for a refusal.
+                //
+                // This can only ever REJECT. A pass earns nothing but the right
+                // to be measured properly in wave 2, so no displayed number ever
+                // originates here and the no-fake-ping rule is untouched.
+                //
+                // v6.7 — the gate now also RECORDS the measured handshake time
+                // ([TcpProbe.connectMs]) so wave 2 can be ordered fastest-first.
+                val gated = ordered.map { (key, cfg) ->
+                    async {
+                        tcpGate.withPermit {
+                            val doorMs = TcpProbe.connectMs(cfg)
+                            if (doorMs >= 0L) {
+                                Triple(key, cfg, doorMs)
+                            } else {
+                                applyResult(key, Pinger.UNREACHABLE)
+                                bump()
+                                null
+                            }
+                        }
+                    }
+                }.awaitAll().filterNotNull()
+
+                // ── v6.7: ORDER THE DEEP WAVE BY REAL MEASURED PROXIMITY ─────
+                //
+                // THE BUG THIS FIXES: «پینگ‌هایی که می‌دهد بالای ۲۵۰ است» —
+                // the list filled up with slow nodes. v6.6 fed wave 2 in raw
+                // feed order, so with only 4–8 deep-probe permits the user spent
+                // the first minute of every sweep watching nodes on the far side
+                // of the planet get measured, while the nearby ones sat unqueued
+                // behind them. The nodes that CAN produce a sub-200 ms ping were
+                // always in the batch; they were simply last in line.
+                //
+                // WHY SORTING BY THE HANDSHAKE IS CORRECT AND NOT A FAKE PING:
+                // the tunnel round trip physically contains the TCP round trip
+                // to the same host, so `doorMs` is a hard lower bound on the
+                // ping this node can ever report. Ordering by a genuine lower
+                // bound is exactly the right way to reach the fast nodes first.
+                // It changes only WHEN a config is measured, never WHAT is
+                // reported: every displayed number still comes out of wave 2.
+                val survivors = gated.sortedBy { it.third }
+
+                // ── WAVE 2: the DEEP probe, only for nodes that answered ──────
+                // Narrow gate (native cores are expensive). Launched fastest-
+                // first so the low-ping rows land within the first seconds.
+                survivors.map { (key, cfg, _) ->
                     async {
                         gate.withPermit {
                             setStatus(key, PingStatus.Testing)
                             val ms = probeWithRetry(cfg)
                             applyResult(key, ms)
-                            val n = tested.incrementAndGet()
-                            _sweep.value = SweepState(running = true, tested = n, total = ordered.size)
+                            bump()
                         }
                     }
                 }.awaitAll()
@@ -319,6 +410,20 @@ object PingService {
     private suspend fun probeWithRetry(cfg: ServerConfig): Long {
         val first = runCatching { Pinger.ping(cfg) }.getOrDefault(Pinger.UNREACHABLE)
         if (first > 0L) return first
+
+        // v6.6 — DON'T PAY FOR A POINTLESS SECOND ATTEMPT.
+        //
+        // The retry exists because a genuinely alive but flaky Iranian link very
+        // often succeeds on the second try. It is worthless, however, when the
+        // node is simply gone: re-running the full deep probe on a corpse doubles
+        // the time the user waits for a result that cannot change.
+        //
+        // One cheap socket connect tells the two cases apart. If nothing accepts
+        // a connection now, the retry would fail at Pinger's own stage 0 anyway,
+        // so we skip straight to the verdict. (Still reject-only: this decides
+        // whether to retry, never what number to display.)
+        if (!TcpProbe.reachable(cfg)) return Pinger.UNREACHABLE
+
         val retry = runCatching { Pinger.ping(cfg) }.getOrDefault(Pinger.UNREACHABLE)
         return if (retry > 0L) retry else Pinger.UNREACHABLE
     }
