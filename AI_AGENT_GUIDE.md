@@ -361,6 +361,12 @@ fails to connect — the reported «پینگ می‌دهد ولی وصل نمی�
   burst and then die; without this they show green and fail on connect. Do not
   remove it as an "optimisation".
 
+> **Superseded by v6.6 — see §5e.** The *principle* above (the gate must never be
+> stricter than the list ping) still holds and is still enforced, but the numbers
+> and the mechanism changed: the budget is now **10 s** against a **9 s** list
+> ping, and the sustain check was replaced by the stronger **payload verdict**.
+> Do not "restore" the numbers in this section.
+
 ### `tcpcongestion: bbr` is a FIX, not a tweak
 
 In `XrayConfigBuilder`'s per-outbound `sockopt`: `bbr` paces from measured
@@ -409,6 +415,277 @@ silently. That is the whole «بارکد کار نمی‌کند» bug.
 If you change `QrCode.kt`, change `qrcode.js` in the same commit. Same rule for
 `normalizeLink()` (JS) and `QrLinkConfig.normalizedUrl()` (Kotlin): scheme-less
 input gets `https://`, other schemes (`tg:`, `mailto:`) pass through untouched.
+
+---
+
+## 5e. v6.6 INVARIANTS (do not regress)
+
+v6.6 fixed four reported defects: fake pings, slow pings, "connects but doesn't
+work", and the 30-second wait. Each fix is load-bearing. **Read this whole
+section before touching `Pinger`, `PingService`, `NeonVpnService.connect`, or
+anything in `net/`.**
+
+### A ping is a THREE-STAGE verdict. All three stages are required.
+
+`Pinger.ping()` is a pipeline, not a measurement:
+
+1. **`TcpProbe.reachable()`** — reject-only pre-gate.
+2. **Latency samples** — `SAMPLE_COUNT = 3`, need `MIN_GOOD_SAMPLES = 2`, report
+   the **median of the warm samples** (drop the cold first when ≥3).
+3. **`verdictProbe()` → `XrayManager.measureConfigThroughput()`** — after
+   `VERDICT_PAUSE_MS` (350 ms), a **fresh** connection must fetch a **real body**
+   (including a 32 KiB `speed.cloudflare.com` download).
+
+**Why stage 3 exists, and why deleting it brings the fake-ping bug straight back:**
+a zero-byte `204` latency probe proves only that ONE tiny request completed.
+Iranian DPI routinely admits the first handshake and **resets the next**; a node
+at its connection cap accepts one trivial request and then stops serving. Both
+pass a 204 probe. Stage 3 is the only thing that catches them.
+
+This works *because* `Libv2ray.measureOutboundDelay(json, url)` builds its **own
+throwaway core per call**. That property is what makes stage 3 a genuinely new
+connection. If you ever refactor to reuse a core here, the verdict becomes
+worthless.
+
+### The TCP pre-gate may only ever REJECT
+
+`TcpProbe` must **never** produce a number that reaches the UI. It answers one
+question — "does anything accept a TCP connection on `address:port`?" — and:
+
+- a **failure** is proof: Xray dials that same socket, so the core would fail too;
+- a **success** proves nothing (DPI resets on the ClientHello), it only earns the
+  right to be measured by stage 2.
+
+This is exactly why the pre-gate does not violate Golden Rule #2 (no fake stats).
+Keep it reject-only.
+
+### The sweep is TWO WAVES with two different concurrency limits
+
+`PingService`:
+
+- **Wave 1** — `TcpProbe`, gated by `TCP_GATE_CONCURRENCY` (48). One socket each:
+  no native core, no TLS. This is what makes the sweep feel instant, because a
+  public feed is mostly dead entries.
+- **Wave 2** — the full `Pinger` pipeline, gated by `MAX_CONCURRENCY` (4–8).
+
+**Do not raise `MAX_CONCURRENCY`** to speed things up. Each deep probe spins up a
+native Xray core worth tens of MB; that ceiling exists because higher values
+exhausted native memory on 1–2 GB devices (the v4.7 crash). Widen wave 1 instead
+— that is the cheap wave, and it is where the time actually goes.
+
+`probeWithRetry()` retries only when a cheap socket check still says the node is
+alive. Re-running a full deep probe on a corpse cannot change the answer and
+doubles the user's wait.
+
+### Probes are ZERO-DNS. Never point a probe at a bare hostname.
+
+Every latency probe must resolve to nothing at all:
+
+- `ProbeEndpoints.INSTANT = "https://1.1.1.1/cdn-cgi/trace"` — an **IP literal**;
+- `ProbeEndpoints.HOSTS` is injected as a static `dns.hosts` table into **both**
+  `XrayConfigBuilder.build()` **and** `buildPingConfig()`.
+
+Both must keep the block, for two reasons: a cold DoH lookup costs 2–4 s on
+*every sample* (this was most of the "slow ping" complaint), and if the live
+config and the ping config resolve differently they are no longer measuring the
+same thing.
+
+### The connect gate verifies the DEVICE PATH, with the bridge already running
+
+The order in `NeonVpnService` is **load-bearing** and was inverted in v6.6:
+
+```
+start core → waitForSocksInbound() → startTun2Socks()  ← bridge FIRST
+           → verify probeDevicePath()                   ← then verify
+```
+
+v6.5 verified with `xray.measureDelay()`, which dials **straight out of the
+core** and therefore **cannot see a broken TUN → tun2socks → SOCKS bridge** —
+which is precisely what decides whether the *device* has internet. That is the
+whole "it says connected but nothing works" bug. Never move the verification
+back above `startTun2Socks`, and never downgrade it to a core-only probe.
+
+`probeDevicePath()` must keep **draining the response body**
+(`conn.inputStream.use { it.readBytes() }` → `isNotEmpty()`). A status code alone
+can be produced by a tunnel that cannot actually carry data.
+
+If verification fails the session **must** be torn down and reported as
+`STATE_ERROR`. Never report `STATE_CONNECTED` on an unverified tunnel.
+
+### Budgets: 10 s gate vs 9 s list ping
+
+`CONNECT_VERIFY_BUDGET_MS = 10_000`, list ping `PER_CONFIG_BUDGET_MS = 9_000`.
+The §5d rule still applies — **the gate must never be stricter than the list
+ping** — so if you change one, re-check the other. The gate is *faster* than
+v6.5's 14 s yet *more thorough*, because it tests the right thing.
+
+Never restore the blind `Thread.sleep(450)` before the bridge:
+`waitForSocksInbound()` polls every 25 ms and returns as soon as the inbound is
+actually up. The retry ramp starts at **120 ms** (v6.5 used 300–900 ms).
+
+### NO PROXIES. Not one. This is a hard product requirement.
+
+Every public forwarder was deleted in v6.6: `r.jina.ai`, `api.allorigins.win`,
+`ghproxy.net`, `cors.isomorphic-git.org`, `gh.api.99988866.xyz`,
+`cdn.statically.io`, `gitcdn.link`. **Do not add another one, ever**, and do not
+"temporarily" reintroduce one to fix a fetch failure.
+
+They are third-party servers that see and can rewrite every config the user is
+about to route their traffic through; they are rate-limited and mostly blocked
+from Iran anyway; and each dead one had to time out (~9 s) before the next was
+tried — five of them was most of a minute wasted per source.
+
+**The correct fix attacks the real blocking mechanism.** On Iranian ISPs the
+dominant block on `raw.githubusercontent.com` is **DNS poisoning** — the host is
+reachable once you learn its true address. So:
+
+- **`net/CfDns.kt`** — an `okhttp3.Dns` that resolves over **Cloudflare DoH**
+  (`1.1.1.1` / `1.0.0.1` **by IP literal**, so there is no bootstrap lookup to
+  poison), 10-minute cache, IPv4-only, system-resolver fallback. The fallback
+  matters: on an unfiltered link, or where DoH itself is blocked, the system
+  resolver is fine and we must not fail hard.
+- **`net/DirectHttp.kt`** — the ONE shared HTTP client. `.dns(CfDns)`,
+  `.proxy(java.net.Proxy.NO_PROXY)` (also stops OkHttp inheriting a
+  carrier-injected system proxy), pooled connections + HTTP/2, tight timeouts.
+
+**All new network code must go through `DirectHttp`.** Do not open a fresh
+`HttpURLConnection` for a feed fetch — you lose DoH resolution, the
+`NO_PROXY` guarantee, and the connection pool that makes many small fetches fast.
+The only remaining fallback mirror is `cdn.jsdelivr.net` (GitHub's own immutable
+CDN — not a forwarder).
+
+Exempt from `DirectHttp`, by design: `CfDns` itself (it must not recurse into the
+client that depends on it) and the geo-IP / counter helpers in
+`util/CountryFlags.kt` and `stats/UserStatsReporter.kt`, which are plain public
+APIs and not part of the config supply chain.
+
+### PING always means: clear → "Pinging…" → new value
+
+Both `pingAll()` and `pingOne()` set the affected rows to `PingStatus.Testing`
+**before** probing and write the result only when the probe finishes. The UI maps
+`Testing → "Pinging…"`. Values must never auto-jump, drift, or reset on their
+own. `cancel()` flips orphaned `Testing` rows back to `Idle` and leaves every
+finished measurement untouched.
+
+---
+
+## 5f. v6.7 INVARIANTS (do not regress)
+
+v6.7 is the release that made Auto Test produce **low-ping** configs **fast**.
+Everything below is load-bearing; each rule exists because breaking it
+re-introduces a specific, reported bug.
+
+### The TCP measurement may ONLY reject or order — NEVER display
+
+`TcpProbe.connectMs()` returns the real, measured handshake time to a node's
+`address:port`. It exists because the tunnel round trip **physically contains**
+the TCP round trip to the same host, which makes the measurement a hard **lower
+bound** on the ping that node could ever report — and therefore the correct key
+for ordering work.
+
+It is **not a ping**. It is the latency to the node's front door, not through the
+tunnel. Three consumers use it, and all three obey the same contract:
+
+| Consumer | Uses it to | Must never |
+|---|---|---|
+| `PingService.pingAll()` wave 1 | reject the dead; sort wave 2 ascending | write it into `statuses` |
+| `AutoTestEngine.triageBatch()` | drop undialable configs; order the batch | mark a config working |
+| `ConnectivityProbe` phase 1 | score/rank source feeds; order the batch | report it as a latency |
+
+**Every number the user ever sees still comes out of `Pinger`**, including the
+v6.6 Stage-2 payload verdict. If you ever find yourself writing a `connectMs()`
+result into `PingStatus.Reachable`, stop — that is the fake ping this project
+forbids, and it is exactly what §0 Golden Rule #2 is about.
+
+### Auto Test must be STRICTER than the manual ping, never looser
+
+`AutoTestEngine.WORKING_MAX_MS = 2_500` vs `Pinger.MAX_VALID_MS = 8_000`.
+
+Auto Test runs unattended for hours and writes directly into **My Configs**. At
+the old 8 000 ms bar it filled the user's list with nodes that technically
+answered and then made every page load feel broken — the reported *«هر کانفیگی
+پینگ بالا می‌دهد»*. The invariant:
+
+> `AutoTestEngine.WORKING_MAX_MS` **≤** `Pinger.MAX_VALID_MS`, always.
+
+Auto Test may only accept a **subset** of what a manual ping accepts, so it can
+never bless something a manual ping would reject. Raising it back toward 8 s
+re-creates the bug; lowering it below ~1 s starts discarding usable nodes on a
+high-RTT Iranian link.
+
+Accepted configs are written **sorted ascending by their real measured ping**
+(`flushWorking`), because the app auto-selects the first row.
+
+### Phase 1 (0→60 %) must MEASURE, not merely FETCH
+
+The pre-v6.7 phase 1 stopped at the first feed that answered. That made the
+winner an accident of list order, and — more importantly — it tested GitHub's
+availability rather than whether the *servers inside the feed* work for this
+user. Do not go back to it.
+
+Phase 1 must:
+
+1. fetch `CANDIDATES_PER_KIND` feeds **in parallel** (never serially),
+2. handshake `SAMPLES_PER_SOURCE` nodes from each, sampled **evenly across the
+   feed** (never the first N — the head of these lists is the same stale block
+   everywhere, so head-sampling scores all feeds alike),
+3. rank with `scoreOf()` = `median RTT × (1 / hit-rate) + fetchMs/10`,
+4. refuse to bond to a feed with fewer than `MIN_LIVE_SAMPLES` live nodes.
+
+The candidate window **rotates by round** so a retry inspects different feeds.
+
+The bar is driven by completed network work only. It may never regress (the
+`AtomicInteger` CAS in `emit()` guarantees this under the parallel probes), it
+must **hold** rather than sprint to 60 % while the link is down, and it may only
+reach `PHASE1_END` on a genuine success.
+
+### Concurrency: wide for sockets, narrow for cores
+
+| Wave | Constant | Value | Why |
+|---|---|---|---|
+| socket triage | `TcpProbe.MAX_CONCURRENCY` | 48 | a bare socket is an fd + a few hundred bytes |
+| deep probe | `PingService.MAX_CONCURRENCY` | 4–8 | each spins a throwaway native Xray core (tens of MB) |
+| Auto Test deep | `AutoTestEngine.MAX_CONCURRENCY` | 3–6 | same, on a lower-RAM budget |
+
+**Never raise the deep-probe numbers.** That was the v4.7 low-RAM crash. Widening
+the *socket* waves is safe and is where the speed comes from.
+
+### `LiveSources` grows, it never shrinks
+
+70 feeds as of v6.7 (50 original + 20 added). Rules:
+
+- **vless / vmess only** (Golden Rule #4).
+- **Never delete an existing entry** — the user's instruction is explicit:
+  *«قبلی‌ها رو پاک نکن از همون‌ها هم استفاده کن»*. A feed that goes dark costs
+  one timed-out fetch inside a parallel wave and is then simply outranked; that
+  is far cheaper than losing a feed that comes back.
+- **Verify every new URL with a real HTTP request before adding it.** All 20
+  v6.7 additions were confirmed to return real links. Do not add a URL you have
+  not fetched.
+- A feed may legitimately appear twice with different `Kind`s when it is a mixed
+  subscription (e.g. `Surfboardv2ray/converted.txt`); `extractLinks` filters by
+  kind, so this is correct and not a duplicate.
+
+### The barcode must resolve to a real URL
+
+Three things must all stay true or the scan degrades to "it just copies the
+link":
+
+1. **The payload carries an explicit scheme.** A payload without one is *text* to
+   a phone camera, and cameras offer *copy* for text. Both the panel link
+   (`QrLinkConfig.normalizedUrl()`) and the download-link fallback
+   (`asBrowsableUrl()`) must normalise to `https://…`. Never append `bt=1`,
+   version markers, or tracking to a barcode payload.
+2. **The manifest declares `<queries>` for `http`/`https` browsable VIEW
+   intents.** Without it, Android 11+ package-visibility filtering makes
+   `startActivity(ACTION_VIEW, https://…)` throw. Do not remove that block.
+3. **`openInBrowser()` never fails silently.** Direct view → system chooser →
+   copy-to-clipboard *with a toast*. The original bug was a bare
+   `runCatching { startActivity(...) }` swallowing the exception.
+
+The `professorvpn://get` deep link must **forward** a `url`/`link`/`to` parameter
+straight to the browser rather than swallowing it, so a scan behaves identically
+whether or not the scanner's phone has the app installed.
 
 ---
 

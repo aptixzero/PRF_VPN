@@ -1,7 +1,8 @@
 package com.neonvpn.app.config
 
 /**
- * v4.6 LIVE SOURCES — the 50 direct, live-updating public feeds the app now
+ * v4.6 LIVE SOURCES (grown to 70 in v6.7) — the direct, live-updating public
+ * feeds the app now
  * reads its free configs from (replacing the dead `aptixzero/con_new` GitHub
  * mirror). These are the EXACT 50 links supplied for v4.6, in order.
  *
@@ -82,7 +83,35 @@ object LiveSources {
         Src("https://raw.githubusercontent.com/coldwater-10/V2Hub2/main/Split/Normal/vless", Kind.VLESS),
         Src("https://raw.githubusercontent.com/coldwater-10/V2Hub2/main/Split/Normal/vmess", Kind.VMESS),
         Src("https://raw.githubusercontent.com/Farid-Karimi/Config-Collector/main/vless_iran.txt", Kind.VLESS),
-        Src("https://raw.githubusercontent.com/Farid-Karimi/Config-Collector/main/vmess_iran.txt", Kind.VMESS)
+        Src("https://raw.githubusercontent.com/Farid-Karimi/Config-Collector/main/vmess_iran.txt", Kind.VMESS),
+
+        // ── v6.7 ADDITIONS ──────────────────────────────────────────────────
+        // 20 extra feeds appended (indices 50..69). Every URL below was verified
+        // LIVE with a real HTTP GET before being added; each returns a non-empty
+        // body containing real `vless://` / `vmess://` links (several are
+        // base64-wrapped — [SourceFetcher] already decodes those).
+        // The original 50 are untouched: v6.7 ONLY grows the pool.
+        // The strict VLESS/VMESS alternation continues here too.
+        Src("https://raw.githubusercontent.com/mheidari98/.proxy/main/vless", Kind.VLESS),
+        Src("https://raw.githubusercontent.com/mheidari98/.proxy/main/vmess", Kind.VMESS),
+        Src("https://raw.githubusercontent.com/Leon406/SubCrawler/main/sub/share/vless", Kind.VLESS),
+        Src("https://raw.githubusercontent.com/mahdibland/V2RayAggregator/master/sub/splitted/vmess.txt", Kind.VMESS),
+        Src("https://raw.githubusercontent.com/Surfboardv2ray/Proxy-sorter/main/submerge/converted.txt", Kind.VLESS),
+        Src("https://raw.githubusercontent.com/Surfboardv2ray/Proxy-sorter/main/submerge/converted.txt", Kind.VMESS),
+        Src("https://raw.githubusercontent.com/ALIILAPRO/v2rayNG-Config/main/server.txt", Kind.VLESS),
+        Src("https://raw.githubusercontent.com/ALIILAPRO/v2rayNG-Config/main/server.txt", Kind.VMESS),
+        Src("https://raw.githubusercontent.com/Epodonios/v2ray-configs/main/All_Configs_Sub.txt", Kind.VLESS),
+        Src("https://raw.githubusercontent.com/mfuu/v2ray/master/v2ray", Kind.VMESS),
+        Src("https://raw.githubusercontent.com/4n0nymou3/multi-proxy-config-fetcher/main/configs/proxy_configs.txt", Kind.VLESS),
+        Src("https://raw.githubusercontent.com/ts-sf/fly/main/v2", Kind.VMESS),
+        Src("https://raw.githubusercontent.com/peasoft/NoMoreWalls/master/list_raw.txt", Kind.VLESS),
+        Src("https://raw.githubusercontent.com/peasoft/NoMoreWalls/master/list_raw.txt", Kind.VMESS),
+        Src("https://raw.githubusercontent.com/Kwinshadow/TelegramV2rayCollector/main/sublinks/mix.txt", Kind.VLESS),
+        Src("https://raw.githubusercontent.com/ermaozi/get_subscribe/main/subscribe/v2ray.txt", Kind.VMESS),
+        Src("https://raw.githubusercontent.com/nyeinkokoaung404/V2ray-Configs/main/All_Configs_Sub.txt", Kind.VLESS),
+        Src("https://raw.githubusercontent.com/barry-far/V2ray-Config/main/All_Configs_Sub.txt", Kind.VMESS),
+        Src("https://raw.githubusercontent.com/MatinGhanbari/v2ray-configs/main/subscriptions/v2ray/super-sub.txt", Kind.VLESS),
+        Src("https://raw.githubusercontent.com/MatinGhanbari/v2ray-configs/main/subscriptions/v2ray/super-sub.txt", Kind.VMESS)
     )
 
     /** Even indices → VLESS feeds. */

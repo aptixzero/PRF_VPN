@@ -5,7 +5,6 @@ import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
-import java.net.HttpURLConnection
 import java.net.URL
 
 /**
@@ -169,7 +168,14 @@ object RemoteConfigStore {
                 }
             }
         } catch (_: Throwable) {}
-        candidates.add("https://r.jina.ai/$urlStr")
+        // v6.6 — `https://r.jina.ai/…` was REMOVED here. It is a third-party
+        // reverse proxy that saw every panel fetch, it is rate-limited, and it is
+        // throttled from Iran, so it usually just added a full timeout before
+        // failing. The panel now loads reliably without it because
+        // [com.neonvpn.app.net.CfDns] resolves the origin over encrypted
+        // Cloudflare DoH, defeating the DNS poisoning that was the real reason the
+        // direct fetch failed. jsDelivr (GitHub's own CDN, not a proxy) remains as
+        // the fallback above.
 
         // Ensure every candidate is cache-busted so a fresh Publish is never
         // served from a stale CDN edge copy.
@@ -187,22 +193,11 @@ object RemoteConfigStore {
         return null
     }
 
-    private fun fetchOne(urlStr: String): String? {
-        val conn = (URL(urlStr).openConnection() as HttpURLConnection).apply {
-            connectTimeout = 4500
-            readTimeout = 6000
-            instanceFollowRedirects = true
-            requestMethod = "GET"
-            setRequestProperty("User-Agent", "ProfessorVPN/2.9 (Android)")
-            setRequestProperty("Accept", "*/*")
-            setRequestProperty("Cache-Control", "no-cache")
-            setRequestProperty("Pragma", "no-cache")
-        }
-        return try {
-            if (conn.responseCode !in 200..299) return null
-            conn.inputStream.bufferedReader().use { it.readText() }
-        } finally {
-            try { conn.disconnect() } catch (_: Throwable) {}
-        }
-    }
+    /**
+     * v6.6 — routed through the shared proxy-free client so the panel config
+     * benefits from Cloudflare-DoH resolution (works on a poisoned link) and from
+     * connection reuse, and never travels through a third-party proxy.
+     */
+    private fun fetchOne(urlStr: String): String? =
+        com.neonvpn.app.net.DirectHttp.get(urlStr, cacheControl = "no-cache")
 }

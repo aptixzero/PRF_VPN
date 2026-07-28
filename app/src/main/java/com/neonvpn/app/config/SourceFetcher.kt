@@ -3,17 +3,18 @@ package com.neonvpn.app.config
 import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import java.net.HttpURLConnection
-import java.net.URL
-import javax.net.ssl.HttpsURLConnection
 
 /**
- * v4.6 — resilient single-source fetcher for the [LiveSources] feeds.
+ * Resilient single-source fetcher for the [LiveSources] feeds.
  *
- * Iranian mobile links frequently throttle / DNS-poison `raw.githubusercontent.com`,
- * so a direct GET silently times out. We therefore try the origin URL first and,
- * on failure, retry through a chain of edge-cached CDNs / reverse proxies that
- * stay reachable inside Iran. The first mirror that returns a usable body wins.
+ * v6.6 — **PROXY-FREE.** Iranian ISPs mostly block
+ * `raw.githubusercontent.com` by **DNS poisoning**, not by blocking the address,
+ * so the fix is to learn the true address over an encrypted channel rather than
+ * to hand the request to somebody else's server. Fetches go through
+ * [com.neonvpn.app.net.DirectHttp], which resolves via Cloudflare DoH
+ * ([com.neonvpn.app.net.CfDns]) and connects straight to the origin with full
+ * certificate validation. The old chain of public reverse proxies
+ * (`r.jina.ai`, `allorigins`, `ghproxy`, …) is gone — see [mirrorCandidates].
  *
  * Every call is exception-safe and returns `null` on total failure — one dead
  * source can never crash the batch builder or the Auto-Test probe.
@@ -66,6 +67,30 @@ object SourceFetcher {
         return out
     }
 
+    /**
+     * v6.6 — **NO PROXIES.** The candidate list is now the origin plus GitHub's
+     * own read-only CDN, and nothing else.
+     *
+     * WHAT WAS REMOVED AND WHY: v6.5 appended `ghproxy.net`,
+     * `gh.api.99988866.xyz`, `cors.isomorphic-git.org`, `r.jina.ai` and
+     * `api.allorigins.win`. Those are third-party reverse proxies that read (and
+     * could rewrite) every config before it reached the user, they are heavily
+     * rate-limited, and they are themselves blocked or throttled from Iran — so
+     * the "fallback" usually failed *after* burning a full timeout each. Five dead
+     * candidates at ~9 s apiece is most of a minute per source, which is exactly
+     * the reported slowness.
+     *
+     * WHAT REPLACES THEM: the real blocker on Iranian ISPs is DNS poisoning of
+     * `raw.githubusercontent.com`, and [com.neonvpn.app.net.CfDns] defeats that
+     * directly by resolving over encrypted Cloudflare DoH and dialling the true
+     * origin with full certificate validation. So the ORIGIN itself now succeeds
+     * in the case that used to need a proxy.
+     *
+     * `cdn.jsdelivr.net` is kept as the single fallback. It is not a proxy: it is
+     * GitHub's widely-used immutable CDN, serving the same repository file over
+     * its own anycast edge, and it stays reachable when the GitHub apex is
+     * throttled. One fallback that works beats five that don't.
+     */
     private fun mirrorCandidates(urlStr: String): List<String> {
         val out = LinkedHashSet<String>()
         out.add(urlStr)
@@ -83,39 +108,17 @@ object SourceFetcher {
                 }
                 val path = parts.drop(branchIdx + 1).joinToString("/")
                 out.add("https://cdn.jsdelivr.net/gh/$user/$repo@$branch/$path")
-                out.add("https://fastly.jsdelivr.net/gh/$user/$repo@$branch/$path")
-                out.add("https://gcore.jsdelivr.net/gh/$user/$repo@$branch/$path")
-                out.add("https://cdn.statically.io/gh/$user/$repo/$branch/$path")
             }
         }
-        // Generic reverse-proxy mirrors for any origin host.
-        out.add("https://ghproxy.net/$urlStr")
-        out.add("https://gh.api.99988866.xyz/$urlStr")
-        out.add("https://cors.isomorphic-git.org/$urlStr")
-        out.add("https://r.jina.ai/$urlStr")
-        out.add("https://api.allorigins.win/raw?url=" + urlEncode(urlStr))
         return out.toList()
     }
 
-    private fun urlEncode(s: String): String =
-        try { java.net.URLEncoder.encode(s, "UTF-8") } catch (_: Throwable) { s }
-
-    private fun fetchOne(urlStr: String): String? {
-        val conn = (URL(urlStr).openConnection() as HttpURLConnection).apply {
-            connectTimeout = 7000
-            readTimeout = 9000
-            instanceFollowRedirects = true
-            requestMethod = "GET"
-            setRequestProperty("User-Agent", "v2rayNG/1.8.5 (Android)")
-            setRequestProperty("Accept", "*/*")
-        }
-        if (conn is HttpsURLConnection) { /* default trust is fine for public CDNs */ }
-        return try {
-            val code = conn.responseCode
-            if (code !in 200..299) { Log.w(TAG, "HTTP $code for $urlStr"); return null }
-            conn.inputStream.bufferedReader().use { it.readText() }
-        } finally {
-            try { conn.disconnect() } catch (_: Throwable) {}
-        }
-    }
+    /**
+     * v6.6 — fetched through the shared [com.neonvpn.app.net.DirectHttp] client:
+     * Cloudflare-DoH resolution (beats DNS poisoning), a real connection pool and
+     * TLS session reuse (so the 2nd..Nth source fetch skips the handshake), and
+     * absolutely no proxy in the path.
+     */
+    private fun fetchOne(urlStr: String): String? =
+        com.neonvpn.app.net.DirectHttp.get(urlStr)
 }

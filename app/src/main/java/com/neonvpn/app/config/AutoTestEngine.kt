@@ -107,11 +107,40 @@ object AutoTestEngine {
     private const val MAX_SEEN_KEYS = 12_000
 
     /**
-     * A node is "working" if its measured latency is at or below this. Matches
-     * Pinger's own MAX_VALID_MS so Auto Test accepts EXACTLY what a manual ping
-     * accepts — same engine, same censored-endpoint probe, same threshold.
+     * v6.7 — THE ACCEPTANCE BAR, LOWERED FROM 8 000 ms TO 2 500 ms.
+     *
+     * THE BUG THIS FIXES, in the user's words: «پینگ‌هایی که می‌دهد بالای ۲۵۰
+     * است — خیلی ضعیف، اصلا نمیشه استفاده کرد» and «الان هر کانفیگی پینگ بالا
+     * می‌دهد و نمی‌شود به آن وصل شد».
+     *
+     * Both are the same defect, and it was here. v6.6 copied a config into My
+     * Configs if it answered in EIGHT SECONDS. Eight seconds is not a working
+     * VPN — it is a node that technically completes a handshake and then makes
+     * every page load feel broken. Because Auto Test ran unattended for hours,
+     * the user's list filled up with exactly those nodes, so every config they
+     * tapped was slow. The engine was faithfully doing what it was told; it was
+     * told the wrong thing.
+     *
+     * 2 500 ms is the honest ceiling for "this is worth keeping". It is well
+     * above a good Iranian-link tunnel ping (which lands in the 80–400 ms band
+     * on the nodes this build now surfaces first), so nothing genuinely usable
+     * is thrown away, while everything that would produce the reported misery is
+     * refused. Nodes are additionally sorted ascending on the way in
+     * ([flushWorking]), so the FAST ones sit at the top of the list.
+     *
+     * This is a stricter filter than [Pinger]'s own MAX_VALID_MS, never a looser
+     * one — Auto Test may only ever accept a SUBSET of what a manual ping
+     * accepts, so it can never mark something good that a manual ping would
+     * reject.
      */
-    private const val WORKING_MAX_MS = 8_000L
+    private const val WORKING_MAX_MS = 2_500L
+
+    /**
+     * v6.7 — the "this is a genuinely good node" mark. Purely informational: it
+     * decides nothing, it is only used to tell the user how many of the accepted
+     * nodes are actually fast, in the notification.
+     */
+    private const val FAST_MS = 400L
 
     /**
      * v6.3 — how many CONSECUTIVE cycles may come back with zero fresh configs
@@ -148,6 +177,22 @@ object AutoTestEngine {
     /** v6.3 — how often the stall supervisor checks the heartbeat. */
     private const val SUPERVISOR_TICK_MS = 60_000L
 
+    /**
+     * v6.7 — width of the triage wave. These are bare sockets (no native core,
+     * no TLS, a few hundred bytes each), so unlike [MAX_CONCURRENCY] this can be
+     * an order of magnitude wider with no memory risk. It is what lets a whole
+     * 240-config batch be triaged in about two seconds.
+     */
+    private val TRIAGE_CONCURRENCY: Int = TcpProbe.MAX_CONCURRENCY
+
+    /**
+     * v6.7 — ceiling for the whole triage wave. At 48-wide with a 2.2 s connect
+     * timeout, 240 configs need ~5 worst-case rounds, so this cannot be reached
+     * by anything but a pathological link — in which case we fall back to the
+     * untriaged batch rather than losing it.
+     */
+    private const val TRIAGE_BUDGET_MS = 20_000L
+
     data class Progress(
         val running: Boolean = false,
         val cycle: Int = 0,
@@ -156,6 +201,13 @@ object AutoTestEngine {
         val batchSize: Int = 0,
         val workingFound: Int = 0,       // total working configs saved this session
         val lastWorkingMs: Long = -1L,
+        /**
+         * v6.7 — how many of [workingFound] measured at or below [FAST_MS].
+         * A real count of real measurements; the UI/notification uses it to show
+         * the user that the engine is producing LOW-ping configs, not just any
+         * configs that happened to answer.
+         */
+        val fastFound: Int = 0,
         /**
          * v6.3 — set when the engine turned ITSELF off because it could not make
          * progress (weak/no internet for many consecutive cycles). The UI reads
@@ -258,6 +310,8 @@ object AutoTestEngine {
         job = engineScope.launch {
             var cycle = 0
             val totalWorking = AtomicInteger(0)
+            /** v6.7 — of those, how many measured at or below [FAST_MS]. */
+            val totalFast = AtomicInteger(0)
             var emptyStreak = 0
             _progress.value = Progress(running = true, cycle = 0, phase = "Starting…")
 
@@ -337,6 +391,33 @@ object AutoTestEngine {
                 emptyStreak = 0
                 beat()
 
+                // ================= 1b) v6.7 TRIAGE: FAST FIRST ===============
+                //
+                // «باید تند تند پینگ بگیرد و کانفیگ‌های پینگ پایین بدهد»
+                //
+                // Before v6.7 the batch went straight into the deep prober in
+                // whatever order the feed printed it. With only 3–6 native-core
+                // permits, a 240-config batch meant the user waited many minutes
+                // and the nodes that could have given a 100 ms ping were tested
+                // last — if the cycle even reached them.
+                //
+                // So we now spend ~2 seconds up front on a wide wave of bare TCP
+                // handshakes ([triageBatch]) that does two things:
+                //   • DROPS the configs that accept no connection at all. On a
+                //     public feed that is most of them, and every one dropped is
+                //     a multi-second deep probe we never have to run.
+                //   • ORDERS the survivors by their real measured handshake time,
+                //     which is a hard lower bound on their tunnel ping, so the
+                //     nearest nodes are deep-probed FIRST and land in My Configs
+                //     within seconds of pressing Auto Test.
+                //
+                // Reject-and-order only: no number produced here is ever shown,
+                // and the accept decision still belongs entirely to [Pinger].
+                updateProgress { it.copy(phase = "Triage ${fresh.size}…") }
+                val triaged = runCatching { triageBatch(fresh) }.getOrDefault(fresh)
+                if (triaged.isNotEmpty()) fresh = triaged
+                beat()
+
                 // Replace (not append) so the free list never grows without bound.
                 runCatching { storeMutex.withLock { freeStore.replaceAll(fresh) } }
 
@@ -390,13 +471,25 @@ object AutoTestEngine {
                                                     )
                                                     workingThisBatch.add(cfg.copy())
                                                     val total = totalWorking.incrementAndGet()
+                                                    // v6.7 — count the genuinely
+                                                    // fast ones separately so the
+                                                    // notification reports real
+                                                    // quality, not just a tally.
+                                                    val fast = if (ms <= FAST_MS)
+                                                        totalFast.incrementAndGet()
+                                                    else totalFast.get()
                                                     updateProgress {
-                                                        it.copy(workingFound = total, lastWorkingMs = ms)
+                                                        it.copy(
+                                                            workingFound = total,
+                                                            lastWorkingMs = ms,
+                                                            fastFound = fast
+                                                        )
                                                     }
                                                     runCatching {
                                                         AutoTestNotifier.show(
                                                             appCtx,
-                                                            "اتو تست روشن است · $total کانفیگ سالم اضافه شد"
+                                                            "اتو تست روشن است · $total کانفیگ سالم" +
+                                                                " ($fast کم‌پینگ) · آخرین: ${ms}ms"
                                                         )
                                                     }
                                                 } else {
@@ -496,6 +589,62 @@ object AutoTestEngine {
                 }
             }
         }
+    }
+
+    /**
+     * v6.7 — THE FAST TRIAGE WAVE.
+     *
+     * Runs one bare TCP handshake per config, [TRIAGE_CONCURRENCY]-wide, and
+     * returns only the configs that answered, sorted ASCENDING by their real
+     * measured handshake time.
+     *
+     * WHY IT IS SOUND: Xray dials the node with exactly this TCP connect, so a
+     * config that refuses one here cannot possibly be used — dropping it is
+     * correct and costs ~300 ms instead of the several seconds a deep probe
+     * would burn proving the same thing. And because the tunnel round trip
+     * physically contains this round trip, the measured time is a hard LOWER
+     * BOUND on the ping the node could ever report, which makes it the right key
+     * to sort by when the goal is "find the low-ping nodes first".
+     *
+     * WHAT IT MAY NOT DO: it never produces a displayed ping and never marks a
+     * config as working. Those remain [Pinger]'s job alone, so the pipeline
+     * still cannot show a number it did not measure through the real tunnel.
+     *
+     * Falls back to the input list unchanged on timeout, so a slow link degrades
+     * to the old behaviour instead of losing the batch.
+     */
+    private suspend fun triageBatch(batch: List<ServerConfig>): List<ServerConfig> {
+        if (batch.isEmpty()) return batch
+        val gate = Semaphore(TRIAGE_CONCURRENCY)
+        val measured = withTimeoutOrNull(TRIAGE_BUDGET_MS) {
+            withContext(Dispatchers.IO + crashGuard) {
+                batch.map { cfg ->
+                    async {
+                        val ms = gate.withPermit {
+                            runCatching { TcpProbe.connectMs(cfg) }
+                                .getOrDefault(TcpProbe.UNREACHABLE)
+                        }
+                        cfg to ms
+                    }
+                }.awaitAll()
+            }
+        } ?: return batch
+
+        val live = measured.filter { it.second > 0L }.sortedBy { it.second }
+        // Everything refused a connection. That is almost always a momentary
+        // network drop rather than 240 simultaneously dead nodes, so we hand the
+        // batch back untouched and let the deep prober have the final say.
+        if (live.isEmpty()) return batch
+
+        // Mark the rejects so the Free list shows the truth immediately instead
+        // of leaving rows blank until a later sweep touches them.
+        measured.filter { it.second <= 0L }.forEach { (cfg, _) ->
+            runCatching { PingService.setExternalStatus(cfg, PingService.PingStatus.Unreachable) }
+        }
+
+        Log.i(TAG, "triage: ${live.size}/${batch.size} dialable, " +
+            "fastest door=${live.first().second}ms slowest=${live.last().second}ms")
+        return live.map { it.first }
     }
 
     /**
@@ -599,7 +748,17 @@ object AutoTestEngine {
         }
     }
 
-    /** Drain queued working configs into My Configs in one guarded write. */
+    /**
+     * Drain queued working configs into My Configs in one guarded write.
+     *
+     * v6.7 — the drained group is written FASTEST-FIRST, using each config's
+     * real measured ping as already recorded in [PingService] by the probe that
+     * accepted it. No new measurement and no invented value: we simply read back
+     * the number that was actually measured moments ago and order by it.
+     *
+     * Why it matters: the user's very first tap should land on the best node in
+     * the list, and the default selection below picks the first row.
+     */
     private suspend fun flushWorking(
         myStore: ConfigStore,
         queue: java.util.concurrent.ConcurrentLinkedQueue<ServerConfig>
@@ -607,9 +766,22 @@ object AutoTestEngine {
         val drained = ArrayList<ServerConfig>()
         while (true) { val c = queue.poll() ?: break; drained.add(c) }
         if (drained.isEmpty()) return
+
+        val sorted = runCatching {
+            drained.sortedBy { cfg ->
+                when (val st = PingService.statusOfConfig(cfg)) {
+                    is PingService.PingStatus.Reachable -> st.ms
+                    is PingService.PingStatus.Unstable -> st.ms
+                    // Unknown ordering key → keep it after the measured ones
+                    // rather than pretending it is fast.
+                    else -> Long.MAX_VALUE
+                }
+            }
+        }.getOrDefault(drained)
+
         runCatching {
             storeMutex.withLock {
-                myStore.addServers(drained)
+                myStore.addServers(sorted)
                 if (myStore.getSelectedId() == null) {
                     myStore.getServers().firstOrNull()?.let { myStore.setSelectedId(it.id) }
                 }

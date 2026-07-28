@@ -77,4 +77,66 @@ object ProbeEndpoints {
         "https://1.1.1.1/cdn-cgi/trace",
         "https://www.cloudflare.com/cdn-cgi/trace"
     )
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // v6.6 — ZERO-DNS PROBING (this is what removes seconds from every connect)
+    // ─────────────────────────────────────────────────────────────────────────
+    //
+    // WHY: `measureOutboundDelay` and the device-path probe both start by
+    // RESOLVING the probe hostname. On a cold tunnel that resolution is itself a
+    // full round-trip through the brand-new outbound (DoH to Cloudflare), so the
+    // FIRST probe after connecting paid DNS + TCP + TLS + request — routinely
+    // 2-4 s on an Iranian mobile link, and up to 10 s when the DoH handshake was
+    // shaped. That cost was charged *before* the UI was allowed to say
+    // "Connected", which is the whole of the reported «۳۰ ثانیه باید صبر کنیم».
+    //
+    // Two fixes, both here:
+    //   1. [INSTANT] is an IP-LITERAL URL — `https://1.1.1.1/…`. There is no
+    //      hostname, so there is NO DNS step at all. Cloudflare serves a
+    //      certificate with `1.1.1.1` in its SANs, so TLS validates normally.
+    //      The connect gate fires this one FIRST, which is why the first proof
+    //      of life now lands in a few hundred milliseconds.
+    //   2. [HOSTS] is injected into the Xray `dns.hosts` block, so the named
+    //      Cloudflare probe hosts resolve from a static table instead of paying
+    //      a DoH round-trip. Only Cloudflare's own documented anycast addresses
+    //      are used, and TLS still validates against the real SNI, so this is a
+    //      pure latency win with no security trade-off.
+
+    /**
+     * The zero-DNS probe: an IP-literal Cloudflare endpoint. Needs no resolver,
+     * so it is the cheapest possible "is this tunnel alive?" question and it is
+     * always the first probe the connect gate asks.
+     */
+    const val INSTANT: String = "https://1.1.1.1/cdn-cgi/trace"
+
+    /**
+     * Static resolution table for the named Cloudflare probe hosts, injected as
+     * the Xray `dns.hosts` block. Values are Cloudflare's own documented anycast
+     * addresses:
+     *
+     *   • `cp.cloudflare.com` → 162.159.36.1 / 162.159.46.1 — the addresses
+     *     Cloudflare publishes for its captive-portal endpoint.
+     *   • `one.one.one.one`   → 1.1.1.1 / 1.0.0.1 — the resolver anycast pair.
+     *
+     * `www.cloudflare.com` and `speed.cloudflare.com` are deliberately NOT
+     * pinned: they live on ordinary Cloudflare CDN ranges that rotate, so a
+     * hardcoded address there would eventually go stale. They are only ever
+     * reached as third/fourth fallbacks, where one DNS lookup costs nothing.
+     */
+    val HOSTS: Map<String, List<String>> = linkedMapOf(
+        "cp.cloudflare.com" to listOf("162.159.36.1", "162.159.46.1"),
+        "one.one.one.one" to listOf("1.1.1.1", "1.0.0.1")
+    )
+
+    /**
+     * Cloudflare resolver addresses used for the DoH servers in the Xray DNS
+     * block. IP-literal so the resolver itself never needs a resolver.
+     */
+    val DOH_URLS: List<String> = listOf(
+        "https://1.1.1.1/dns-query",
+        "https://1.0.0.1/dns-query"
+    )
+
+    /** Plain-53 Cloudflare fallbacks (used only if DoH is shaped). */
+    val DNS_PLAIN: List<String> = listOf("1.1.1.1", "1.0.0.1")
 }

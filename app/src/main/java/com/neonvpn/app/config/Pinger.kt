@@ -12,37 +12,52 @@ import kotlinx.coroutines.withTimeoutOrNull
 /**
  * REAL end-to-end reachability test for a single [ServerConfig].
  *
- * v4.7 — THE PING WORKS AGAIN (and it is still 100% real).
  * ─────────────────────────────────────────────────────────────────────────────
- * WHY v4.6 SHOWED NO PING FOR ANY CONFIG (the bug this fixes)
- *   v4.6 required TWO successes on TWO DISTINCT censored endpoints inside a
- *   9-second total budget with 4s per probe. On Iran's high-RTT links the first
- *   endpoint alone can eat 3-4s; a second full round-trip through a SECOND
- *   throwaway Xray core simply never fit the budget — so EVERY config, even a
- *   perfectly working one, came back "unreachable". On top of that the native
- *   `measureOutboundDelay` call is a BLOCKING JNI call that ignores coroutine
- *   cancellation, so the per-probe timeout silently didn't fire and one hung
- *   probe stalled the whole sweep.
+ * v6.6 — FAST, REAL, AND HONEST: "IF IT PINGS, IT CONNECTS"
+ * ─────────────────────────────────────────────────────────────────────────────
  *
- * THE v4.7 RULE (real ping, no Google, realistic for Iran):
- *   • DO NOT test against Google — it is open everywhere and proves nothing.
- *     Every probe endpoint is a genuinely FILTERED target (Cloudflare edge,
- *     Telegram, Instagram) that only a working anti-censorship tunnel reaches.
- *   • ONE confirmed round-trip through the real outbound to a censored endpoint
- *     IS a real, honest ping — it is the same thing v2rayNG shows. We take the
- *     FIRST endpoint that answers and report ITS latency (a real measured
- *     round-trip, never a fake or random number).
- *   • The probe is made truly cancellable: the blocking native call runs in an
- *     `async` job that we await WITH a timeout, so a hung native probe can no
- *     longer freeze the sweep — we abandon it and move on.
+ * WHAT WAS WRONG IN v6.5 (the two reported bugs, and they were the same bug)
  *
- * The probe always travels THROUGH the Xray outbound built by
- * [XrayConfigBuilder.buildPingConfig] — the SAME outbound + stream settings the
- * live connect path uses — so it reflects the real tunnel on any network
- * (Wi-Fi / mobile data / any ISP), never the local link.
+ *   «پینگ فیک می‌دهد»  — a config showed a healthy green number and then either
+ *   refused to connect or connected and carried nothing.
+ *   «دیر پینگ می‌گیرد» — a batch took minutes to sweep.
  *
- * Returns the measured latency in ms, or [UNREACHABLE] (-1) if the server
- * cannot reach any censored endpoint.
+ * Both came from the same place. v6.5 measured latency with the core's
+ * `measureOutboundDelay`, which reports the time to complete ONE request through
+ * a freshly-built outbound. That call answers "could a request be made?" — and
+ * on a filtered link a node very often lets a small 204 through and then dies
+ * under any real load, because what DPI resets is the *second* handshake, not
+ * the first. So the number was real but the VERDICT was fake. Meanwhile every
+ * dead config in the batch still burned the full 12 s budget (24 s with the
+ * retry) inside its own throwaway native core, which is where the minutes went.
+ *
+ * THE v6.6 PIPELINE — three stages, each one cheap enough to justify the next:
+ *
+ *   Stage 0 — TCP pre-gate ([TcpProbe], ~300 ms, 48-wide).
+ *             Xray dials the node with a plain TCP connect, so if that fails the
+ *             core's dial cannot succeed either. This REJECTS the ~80 % of a
+ *             public batch that is simply dead, for the price of one SYN. It can
+ *             only ever reject — a success is not a ping and is never displayed.
+ *
+ *   Stage 1 — Zero-DNS latency lock-on ([ProbeEndpoints.INSTANT]).
+ *             The reference endpoint is tried as an IP LITERAL first, so the
+ *             probe pays no DNS round-trip. This is where most of the remaining
+ *             time was hiding: on a cold outbound the DoH lookup alone could be
+ *             2-4 s, and it was being paid on every single sample.
+ *
+ *   Stage 2 — THE VERDICT: a real payload on a SECOND connection.
+ *             This is the actual fake-ping fix. After the latency samples we
+ *             open a brand-new connection and pull real response BYTES
+ *             ([XrayManager.measureConfigThroughput]). A node that only survives
+ *             the first tiny handshake fails here, which is precisely the class
+ *             of node that used to show green and then not work. Passing this
+ *             means the node completed a fresh handshake AND moved real bytes —
+ *             the same two things the live connect path needs, so the promise
+ *             "a config that pings will connect" is now structurally true rather
+ *             than hoped for.
+ *
+ * Every number reported is a measured round-trip through the real outbound. No
+ * `Random`, no estimate, no synthesis — Golden Rule #2 holds.
  */
 object Pinger {
 
@@ -52,21 +67,39 @@ object Pinger {
     const val UNREACHABLE = -1L
 
     /**
-     * Hard wall-clock ceiling for the ENTIRE ping of one config (all probe
-     * attempts combined). Callers must treat [ping] as already-bounded and must
-     * NOT wrap it in a shorter timeout (that was the v4.2 starvation bug).
+     * Hard wall-clock ceiling for the ENTIRE ping of one config (all stages
+     * combined). Callers must treat [ping] as already-bounded and must NOT wrap
+     * it in a shorter timeout (that was the v4.2 starvation bug).
+     *
+     * v6.6 — 12 s → 9 s. The pre-gate already removed the dead nodes that needed
+     * the long tail, and the zero-DNS probe made each surviving sample several
+     * times cheaper, so a shorter ceiling now rejects only genuinely unusable
+     * nodes while making the sweep dramatically faster. A node that cannot prove
+     * itself in 9 s over the real outbound would be a miserable connection.
      */
-    const val PER_CONFIG_BUDGET_MS = 12_000L
-
-    /** Per single probe attempt ceiling (one endpoint, one round-trip). */
-    private const val PER_PROBE_BUDGET_MS = 5_000L
+    const val PER_CONFIG_BUDGET_MS = 9_000L
 
     /**
-     * v6.5 — pause before the final "sustain" round-trip, long enough that the
-     * probe must open a genuinely NEW connection rather than reusing the warm one
-     * the burst samples shared. See the sustain check in [ping].
+     * Per single probe attempt ceiling (one endpoint, one round-trip).
+     * v6.6 — 5 s → 3.5 s: with DNS removed from the path, a probe that has not
+     * answered in 3.5 s is not "slow", it is being reset.
      */
-    private const val SUSTAIN_PAUSE_MS = 700L
+    private const val PER_PROBE_BUDGET_MS = 3_500L
+
+    /**
+     * v6.6 — budget for the Stage-2 payload verdict. Deliberately generous: this
+     * is a FULL fresh handshake plus a real body, and it is the single most
+     * important measurement we take, because it is the one that decides whether
+     * the user is about to have a working connection.
+     */
+    private const val VERDICT_BUDGET_MS = 5_000L
+
+    /**
+     * Pause before the verdict connection. Long enough that the probe MUST open
+     * a genuinely new connection rather than reusing the warm one the latency
+     * samples shared — which is the entire point of the check.
+     */
+    private const val VERDICT_PAUSE_MS = 350L
 
     /**
      * v4.7 — dedicated scope for the blocking native probe calls. The native
@@ -79,64 +112,60 @@ object Pinger {
     private val probeScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     /**
-     * v6.4 — CLOUDFLARE-ONLY probe endpoints, shared with the live connection.
+     * CLOUDFLARE-ONLY probe endpoints, shared with the live connection.
      *
-     * This list now comes from [ProbeEndpoints], the single source of truth used
-     * by EVERY latency path in the app (list ping, post-connect health check,
-     * watchdog, live stats ping). Before v6.4 the list pinged Cloudflare while
-     * the live connection pinged **Google**, which is precisely why a config
-     * that advertised 120 ms read ~1000 ms the second you connected to it: two
-     * different edges, two different routes, two different statistics.
+     * The list comes from [ProbeEndpoints], the single source of truth used by
+     * EVERY latency path in the app (list ping, connect gate, watchdog, live
+     * stats ping). NO Google anywhere. Cloudflare's anycast edge answers a
+     * zero-byte 204, so the number is pure latency, it is stable/reproducible,
+     * and because Cloudflare is throttled on Iranian ISPs, reaching it still
+     * proves the tunnel genuinely bypasses the filter.
      *
-     * NO Google anywhere. Cloudflare's anycast edge answers a zero-byte 204, so
-     * the number is pure latency, it is stable/reproducible, and because
-     * Cloudflare is throttled on Iranian ISPs, reaching it still proves the
-     * tunnel genuinely bypasses the filter.
+     * v6.6 puts the IP-LITERAL endpoint FIRST so the common case needs no DNS.
      */
-    private val PROBE_URLS = ProbeEndpoints.URLS
+    private val PROBE_URLS: List<String> =
+        (listOf(ProbeEndpoints.INSTANT) + ProbeEndpoints.URLS).distinct()
 
     /**
-     * v4.7 — ONE confirmed censored-endpoint round-trip == reachable. The v4.6
-     * two-confirmation rule did not fit the time budget on Iranian links and
-     * made EVERY config read "unreachable" (the "no ping at all" bug). A single
-     * timed success through the real outbound to a FILTERED endpoint is already
-     * a genuine proof of bypass — the same standard v2rayNG applies.
+     * Round-trips taken against the SAME reference endpoint, whose MEDIAN
+     * becomes the reported ping.
+     *
+     * v6.6 — 4 → 3. The Stage-2 payload verdict now carries the reliability
+     * burden, so extra latency samples bought accuracy we did not need at a cost
+     * (sweep time) we could not afford. Three samples still give a median that
+     * is immune to a single outlier.
      */
-    private const val REQUIRED_CONFIRMATIONS = 1
-
-    /**
-     * v6.4 — number of round-trips taken against the SAME reference endpoint,
-     * whose MEDIAN becomes the reported ping. Raised 3 → 4: with the endpoint
-     * now identical to the live connection's (Cloudflare only), one extra warm
-     * sample is what makes the list number and the connected number line up
-     * instead of differing by an order of magnitude.
-     */
-    private const val SAMPLE_COUNT = 4
+    private const val SAMPLE_COUNT = 3
 
     /** Latency upper bound for a node we still treat as "reachable". */
     private const val MAX_VALID_MS = 8_000L
 
     /**
-     * v6.3 — how many of the [SAMPLE_COUNT] round-trips must SUCCEED before we
-     * are willing to call a node reachable and show a green ping.
-     *
-     * Two (not one) is the whole fix for "it pings 150 ms but the connection
-     * doesn't work". A dead-but-answering node reliably passes ONE tiny 204 and
-     * then stops; it almost never passes two in a row. Requiring two costs a few
-     * hundred milliseconds per config and removes nearly all the false greens.
+     * How many of the [SAMPLE_COUNT] round-trips must SUCCEED before a node may
+     * proceed to the verdict stage. Two, not one: a dead-but-answering node
+     * reliably passes ONE tiny 204 and then stops.
      */
     private const val MIN_GOOD_SAMPLES = 2
 
-    /**
-     * v6.3 — how many failed round-trips we tolerate while sampling before
-     * giving up on the reference endpoint. Raised from 2 to 3 so a single
-     * hiccup on a weak mobile link doesn't discard an otherwise good node.
-     */
-    private const val MAX_SAMPLE_FAILS = 3
+    /** Failed round-trips tolerated while sampling before abandoning the endpoint. */
+    private const val MAX_SAMPLE_FAILS = 2
 
     suspend fun ping(cfg: ServerConfig): Long = withContext(Dispatchers.IO) {
         // Only vless / vmess are buildable; anything else is unreachable here.
         if (cfg.protocol != "vless" && cfg.protocol != "vmess") return@withContext UNREACHABLE
+
+        // ── STAGE 0 — TCP PRE-GATE ────────────────────────────────────────────
+        // One SYN answers "can this address be dialled from this device at all?"
+        // Xray's own dial is the same TCP connect, so a failure here is proof the
+        // core would fail too. This is what makes a 240-config sweep finish in
+        // seconds: the dead majority is eliminated for ~300 ms each instead of
+        // occupying a native core for the full budget.
+        //
+        // It may ONLY reject. Success is not a ping and is never displayed.
+        if (!TcpProbe.reachable(cfg)) {
+            Log.d(TAG, "pre-gate: ${cfg.address}:${cfg.port} not dialable — skipping core probe")
+            return@withContext UNREACHABLE
+        }
 
         // Build the ping config from the EXACT same outbound + stream settings
         // the real connect path uses, so a green ping == genuinely connects.
@@ -147,94 +176,67 @@ object Pinger {
             return@withContext UNREACHABLE
         }
 
-        // v4.8 — STABLE, REPRODUCIBLE PING (fixes "same config pings 90ms now,
-        // no-ping 2 minutes later"). The old code took the FIRST endpoint that
-        // answered and reported ITS single round-trip. That number swung wildly
-        // because (a) different endpoints have very different latencies and (b) a
-        // single sample on a jittery link is noisy — so the SAME node could look
-        // fast, then slow, then dead on consecutive taps.
-        //
-        // The new rule:
-        //   1. Lock onto ONE reference endpoint — the first censored endpoint that
-        //      answers at all (tried fastest-first). This keeps every measurement
-        //      of this config against the SAME target, so numbers are comparable.
-        //   2. Take up to [SAMPLE_COUNT] quick round-trips to that endpoint and
-        //      report their MEDIAN — a realistic, jitter-resistant latency instead
-        //      of one lucky/unlucky sample.
-        //   3. If the primary endpoint stops answering mid-sampling, fall back to
-        //      the next censored endpoint so a momentary block on one target does
-        //      not falsely report the whole node as dead.
-        // Result: if a node pings 90ms, it keeps pinging ~90ms; a node that is
-        // genuinely down reads UNREACHABLE consistently.
         val result = withTimeoutOrNull(PER_CONFIG_BUDGET_MS) {
             val samples = ArrayList<Long>(SAMPLE_COUNT)
 
-            // find the reference endpoint (first that answers), fastest-first.
-            var refUrl: String? = null
+            // ── STAGE 1 — LOCK ONTO ONE REFERENCE ENDPOINT ────────────────────
+            // Every measurement of this config goes to the SAME target so the
+            // numbers are comparable, and the IP-literal endpoint is tried first
+            // so the common case pays no DNS round-trip at all.
+            var found: String? = null
             for (url in PROBE_URLS) {
                 val ms = singleProbe(json, url)
-                if (ms in 1..MAX_VALID_MS) { refUrl = url; samples.add(ms); break }
+                if (ms in 1..MAX_VALID_MS) { found = url; samples.add(ms); break }
             }
-            if (refUrl == null) return@withTimeoutOrNull UNREACHABLE
+            // Bind to a val so the loop below needs no smart cast.
+            val refUrl = found ?: return@withTimeoutOrNull UNREACHABLE
 
-            // gather additional samples against the SAME reference endpoint.
+            // Additional samples against that same reference endpoint.
             var fails = 0
             while (samples.size < SAMPLE_COUNT && fails < MAX_SAMPLE_FAILS) {
                 val ms = singleProbe(json, refUrl)
                 if (ms in 1..MAX_VALID_MS) samples.add(ms) else fails++
             }
 
-            // ── v6.3 QUALITY GATE ────────────────────────────────────────────
-            // The v6.2 rule ("one confirmed round-trip == reachable") is exactly
-            // what produced the reported bug: "sometimes it shows ping 100–200
-            // but when we connect it doesn't work at all, or is very weak."
-            //
-            // A single successful handshake is NOT proof of a usable tunnel. On
-            // a heavily-shaped link a dying node very often answers the first
-            // tiny 204 and then collapses — so it advertised a pretty 150 ms and
-            // was useless the moment real traffic started.
-            //
-            // From v6.3 a node must SUSTAIN the tunnel: at least
-            // [MIN_GOOD_SAMPLES] separate round-trips have to succeed against
-            // the SAME endpoint. That single change filters out the "pings but
-            // won't carry traffic" nodes before the user ever taps connect.
+            // A single successful handshake is NOT proof of a usable tunnel: on a
+            // heavily-shaped link a dying node answers the first tiny 204 and then
+            // collapses. Require at least two.
             if (samples.size < MIN_GOOD_SAMPLES) return@withTimeoutOrNull UNREACHABLE
 
-            // ── v6.5 — THE SUSTAIN CHECK ("if it pings, it connects") ─────────
-            // The remaining false-green case in v6.4: a node that answers a
-            // burst of back-to-back 204s (they all ride ONE warm connection) and
-            // then dies as soon as a NEW connection is opened a moment later —
-            // which is exactly what happens when the user taps connect. All the
-            // samples above are taken within a few hundred ms of each other, so
-            // they cannot see that.
+            // ── STAGE 2 — THE VERDICT: REAL BYTES ON A FRESH CONNECTION ───────
             //
-            // So after a deliberate pause we open ONE more round-trip. Passing it
-            // proves the node still accepts a FRESH handshake, i.e. it will still
-            // be there when the connect path dials it. Nodes with only two good
-            // samples must pass this; a node that already produced three or more
-            // successes has demonstrated enough and is accepted as-is (keeps the
-            // sweep fast and never turns a genuinely good node red).
-            if (samples.size < 3) {
-                try { kotlinx.coroutines.delay(SUSTAIN_PAUSE_MS) } catch (_: Throwable) {}
-                val sustain = singleProbe(json, refUrl)
-                if (sustain !in 1..MAX_VALID_MS) {
-                    Log.w(TAG, "sustain check failed — node answers once then collapses")
-                    return@withTimeoutOrNull UNREACHABLE
-                }
-                samples.add(sustain)
+            // THIS is the fake-ping fix, and it is the reason the promise "a
+            // config that pings will connect" can now be made honestly.
+            //
+            // Everything above only proves the node can complete small requests
+            // in a quick burst that all ride ONE warm connection. The failure the
+            // user actually hit is a node that does exactly that and then dies
+            // the moment a NEW connection is opened under real load — which is
+            // precisely what happens when they tap connect. No number of extra
+            // latency samples can see that, because they all share the warm path.
+            //
+            // So after a deliberate pause we open a genuinely new connection and
+            // require real response BYTES to come back through it. A node passing
+            // this has demonstrated the two things the live connect path needs:
+            // a fresh handshake through DPI, and actual payload throughput.
+            try { kotlinx.coroutines.delay(VERDICT_PAUSE_MS) } catch (_: Throwable) {}
+            val carried = verdictProbe(json)
+            if (!carried) {
+                Log.w(TAG, "verdict failed for ${cfg.address}:${cfg.port} — " +
+                    "answers a handshake but cannot carry a payload (would be a fake green)")
+                return@withTimeoutOrNull UNREACHABLE
             }
 
-            // ── v6.4 — REPORT THE SAME STATISTIC THE LIVE CONNECTION REPORTS ──
+            // ── REPORT THE SAME STATISTIC THE LIVE CONNECTION REPORTS ─────────
             // The list and the connected screen must agree, otherwise the user
-            // sees "120 in the list → 1000 after connecting" (the reported bug).
+            // sees "120 in the list → 1000 after connecting".
             //
-            // The very FIRST sample is always the cold one: it pays for the full
-            // TCP + TLS/Reality handshake through a brand-new core. Every later
-            // sample rides the warmed-up path — which is exactly the state the
-            // tunnel is in once you are connected. So when we have enough
-            // samples we DROP the cold one and take the median of the warm rest;
-            // that is precisely how [XrayManager.measureDelay] now reports the
-            // live number, so the two figures finally describe the same thing.
+            // The FIRST sample is always the cold one: it pays for the full TCP +
+            // TLS/Reality handshake through a brand-new core. Every later sample
+            // rides the warmed-up path — exactly the state the tunnel is in once
+            // connected. So when we have enough samples we DROP the cold one and
+            // take the median of the warm rest; [XrayManager.measureDelayStable]
+            // does the identical thing, so the two figures describe the same thing.
             val warm = if (samples.size >= 3) samples.drop(1) else samples
             median(warm)
         }
@@ -253,12 +255,12 @@ object Pinger {
     /**
      * One hard-wall-clock-capped proxied round-trip through [json] to [url].
      *
-     * v4.7 — TRULY cancellable. The native measure call blocks and ignores
-     * cancellation, so it runs as an [async] child of [probeScope] and we await
-     * it with a timeout. When the timeout fires, `await()` is cancelled (await
-     * IS cancellable even though the native call isn't) and we return -1
+     * TRULY cancellable. The native measure call blocks and ignores cancellation,
+     * so it runs as an [async] child of [probeScope] and we await it with a
+     * timeout. When the timeout fires, `await()` is cancelled (await IS
+     * cancellable even though the native call isn't) and we return -1
      * immediately — the abandoned native call finishes in the background and is
-     * discarded. This is what un-freezes the sweep that v4.6 stalled.
+     * discarded.
      */
     private suspend fun singleProbe(json: String, url: String): Long {
         val deferred = probeScope.async {
@@ -271,5 +273,25 @@ object Pinger {
         }
         return withTimeoutOrNull(PER_PROBE_BUDGET_MS) { deferred.await() }
             ?: run { deferred.cancel(); -1L }
+    }
+
+    /**
+     * v6.6 — the Stage-2 verdict: does a FRESH connection through this outbound
+     * actually carry a real payload?
+     *
+     * Cancellable in the same way as [singleProbe], so a node that hangs here
+     * costs the budget and nothing more.
+     */
+    private suspend fun verdictProbe(json: String): Boolean {
+        val deferred = probeScope.async {
+            try {
+                XrayManager.measureConfigThroughput(json)
+            } catch (e: Throwable) {
+                Log.w(TAG, "verdict probe error: ${e.message}")
+                false
+            }
+        }
+        return withTimeoutOrNull(VERDICT_BUDGET_MS) { deferred.await() }
+            ?: run { deferred.cancel(); false }
     }
 }
