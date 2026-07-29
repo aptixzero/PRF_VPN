@@ -689,6 +689,60 @@ whether or not the scanner's phone has the app installed.
 
 ---
 
+## 5g. v6.8 INVARIANTS (do not regress)
+
+v6.8 is the SPEED release. It changed the **cost** of a ping, never its meaning.
+Read this before touching `Pinger`, `XrayManager.measureConfigThroughput`,
+`PingService`, or `AutoTestEngine`.
+
+### A ping still spins native cores — v6.8 just spins FEWER of them
+
+Every `Libv2ray.measureOutboundDelay` call constructs a full throwaway native
+Xray core. The number of cores per config is what dominates the sweep's
+wall-clock, and it is the lever v6.8 pulls:
+
+- `Pinger.SAMPLE_COUNT = 2` (was 3). Two samples: discard the cold first one,
+  report the warm second. Do not raise it back to 3 "for accuracy" — the accuracy
+  that matters comes from the Stage-2 verdict, not from more latency samples.
+- `Pinger.MIN_GOOD_SAMPLES = 1` (was 2). The **verdict** (a fresh connection
+  carrying real bytes) is the proof a node works; requiring a second latency
+  sample on top of it double-charged the most expensive step and discarded good
+  high-RTT Iranian nodes. Do not raise it.
+- `XrayManager.measureConfigThroughput()` issues **ONE** probe to
+  `ProbeEndpoints.INSTANT` (zero-DNS IP literal, real ~350 B body) — NOT a loop
+  over several payload URLs. The old loop paid up to THREE extra cores for a
+  single config. Never reintroduce the `PAYLOAD_URLS` walk. One real-body probe
+  through a brand-new core already proves both a fresh DPI handshake and real
+  payload throughput, which is the entire verdict.
+- Budgets tightened: `PER_CONFIG_BUDGET_MS = 6 000`, `PER_PROBE_BUDGET_MS = 2 500`,
+  `VERDICT_BUDGET_MS = 3 500`. These are floors on how long a *dying* node may
+  cost the sweep; do not raise them without a measured reason.
+
+### The verdict is still mandatory — the fake-ping guarantee depends on it
+
+Cutting samples is fine; cutting the Stage-2 payload verdict is **not**. It is the
+only thing that separates "answers a tiny 204 once" from "carries a real payload
+on a fresh connection", which is exactly the «پینگ فیک» class of node. Keep it.
+
+### Deep-gate concurrency went UP because per-config cost went DOWN
+
+`PingService.MAX_CONCURRENCY` is now **6–12** and `AutoTestEngine.MAX_CONCURRENCY`
+**5–10** (both CPU-scaled). This is only safe because each config now spins ~3
+cores instead of ~5. If you ever restore the extra samples/verdict probes, you
+MUST also drop these back or low-RAM devices will OOM (the v4.7 crash). The wide
+**socket** waves (`TcpProbe.MAX_CONCURRENCY = 48`) are unrelated and stay wide.
+
+### PING ALL must never be emptied by a momentary link blip
+
+`PingService.pingAll()` wave 1 (TCP pre-gate) may reject a config only when it ALSO
+let at least one other through. If the pre-gate rejects **every** node (`anyLive
+== false` — a transient drop, not 200 dead nodes), the whole list is handed to the
+deep prober unchanged instead of being marked Unreachable. This is the fix for
+«Ping All می‌پرد و هیچ کانفیگی پینگ نمی‌گیرد» in My Configs. Do not "simplify" it
+back to unconditionally trusting wave 1.
+
+---
+
 ## 6. ADMIN PANEL (`adminpanel/`)
 
 - `index.html` + `app.js`, fully client-side, no server.

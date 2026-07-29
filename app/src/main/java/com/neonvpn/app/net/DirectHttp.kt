@@ -38,7 +38,7 @@ object DirectHttp {
 
     private const val TAG = "DirectHttp"
 
-    private const val UA = "ProfessorVPN/6.7 (Android)"
+    private const val UA = "ProfessorVPN/6.8 (Android)"
 
     /**
      * The shared client. Built lazily and reused for the whole process so the

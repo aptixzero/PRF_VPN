@@ -310,7 +310,7 @@ class XrayManager(private val context: Context) {
             readTimeout = 6000
             requestMethod = "GET"
             instanceFollowRedirects = true
-            setRequestProperty("User-Agent", "ProfessorVPN/6.6 (Android)")
+            setRequestProperty("User-Agent", "ProfessorVPN/6.8 (Android)")
             setRequestProperty("Accept", "*/*")
         }
         return try {
@@ -409,29 +409,30 @@ class XrayManager(private val context: Context) {
          * @return true when real response bytes came back over a fresh connection.
          */
         fun measureConfigThroughput(configJson: String): Boolean {
-            for (url in PAYLOAD_URLS) {
-                val d = try {
-                    Libv2ray.measureOutboundDelay(configJson, url)
-                } catch (e: Throwable) {
-                    Log.w(TAG, "throughput probe failed on $url: ${e.message}")
-                    -1L
-                }
-                // A valid delay means the core completed the request AND read the
-                // response body — i.e. real bytes moved through the outbound.
-                if (d in 1..12_000) return true
+            // v6.8 — ONE lightweight probe, not a walk of up to three heavy ones.
+            //
+            // WHY THIS IS THE BIGGEST SPEED FIX IN v6.8: every call to
+            // `measureOutboundDelay` constructs its OWN throwaway native Xray core
+            // (tens of MB). v6.6 looped over three payload URLs here, so a node
+            // that only answered the LAST of them paid THREE full core spin-ups —
+            // on top of the two latency samples — for a single config. With the
+            // deep-probe gate only 6–8 wide, that is exactly where the "بالای ۵
+            // دقیقه" wait came from.
+            //
+            // The zero-DNS IP-literal endpoint already returns a REAL response
+            // body (~350 B of `/cdn-cgi/trace`), so completing it proves both of
+            // the things the verdict must prove — a fresh handshake through DPI
+            // AND real payload bytes moving — in one core, with no DNS step. That
+            // is the whole guarantee; the extra endpoints only ever added cost.
+            val d = try {
+                Libv2ray.measureOutboundDelay(configJson, ProbeEndpoints.INSTANT)
+            } catch (e: Throwable) {
+                Log.w(TAG, "throughput probe failed: ${e.message}")
+                -1L
             }
-            return false
+            // A valid delay means the core completed the request AND read the
+            // response body — i.e. real bytes moved through the outbound.
+            return d in 1..10_000
         }
-
-        /**
-         * Probe URLs whose responses carry a REAL body (never a zero-byte 204),
-         * so completing one proves payload throughput rather than just a
-         * handshake. Zero-DNS endpoint first.
-         */
-        private val PAYLOAD_URLS: List<String> = listOf(
-            ProbeEndpoints.INSTANT,                                 // IP literal, ~350 B body
-            "https://speed.cloudflare.com/__down?bytes=32768",      // 32 KiB real download
-            ProbeEndpoints.TRACE_URL                                 // named edge, ~350 B body
-        )
     }
 }

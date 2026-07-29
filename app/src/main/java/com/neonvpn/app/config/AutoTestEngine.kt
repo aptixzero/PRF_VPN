@@ -95,8 +95,15 @@ object AutoTestEngine {
      * transition. 2 cores → 3, 4 cores → 5, 8+ cores → 6.
      */
     private val MAX_CONCURRENCY: Int by lazy {
+        // v6.8 — 3–6 → 5–10. Auto Test now pays far fewer throwaway native cores
+        // per config (v6.8 Pinger: 2 latency samples + 1 single-shot verdict,
+        // down from up to 5), and the wide TCP triage already dropped the dead
+        // majority before this deep wave ever runs, so a bigger window turns the
+        // survivors into My-Configs entries much faster without the low-RAM
+        // crashes the old tiny ceiling was guarding against. Slightly below the
+        // manual PING-ALL ceiling because Auto Test runs unattended for hours.
         val cores = Runtime.getRuntime().availableProcessors().coerceAtLeast(1)
-        (cores + 1).coerceIn(3, 6)
+        (cores + 3).coerceIn(5, 10)
     }
 
     /**

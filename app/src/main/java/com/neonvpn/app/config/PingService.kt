@@ -71,8 +71,16 @@ object PingService {
      * 2 cores → 4, 4 cores → 6, 8+ cores → 8.
      */
     val MAX_CONCURRENCY: Int by lazy {
+        // v6.8 — 4–8 → 6–12. Two things in v6.8 make a wider deep gate safe AND
+        // necessary: (1) each config now spins up markedly FEWER throwaway native
+        // cores than before (2 latency samples + 1 single-shot verdict, down from
+        // up to 5), so the peak native-heap pressure that forced the old tiny
+        // ceiling is much lower; (2) the TCP pre-gate means only the live minority
+        // ever reaches this wave, so the survivors deserve more parallelism to
+        // land their real pings fast. Still scaled off CPU cores so a 2 GB phone
+        // stays at 6 while an 8-core device gets 12.
         val cores = Runtime.getRuntime().availableProcessors().coerceAtLeast(1)
-        (cores + 2).coerceIn(4, 8)
+        (cores + 4).coerceIn(6, 12)
     }
 
     /**
@@ -286,20 +294,46 @@ object PingService {
                 //
                 // v6.7 — the gate now also RECORDS the measured handshake time
                 // ([TcpProbe.connectMs]) so wave 2 can be ordered fastest-first.
-                val gated = ordered.map { (key, cfg) ->
+                val gatedRaw = ordered.map { (key, cfg) ->
                     async {
                         tcpGate.withPermit {
                             val doorMs = TcpProbe.connectMs(cfg)
-                            if (doorMs >= 0L) {
-                                Triple(key, cfg, doorMs)
-                            } else {
-                                applyResult(key, Pinger.UNREACHABLE)
-                                bump()
-                                null
-                            }
+                            Triple(key, cfg, doorMs)
                         }
                     }
-                }.awaitAll().filterNotNull()
+                }.awaitAll()
+
+                // ── v6.8: NEVER let a momentary network blip empty the sweep ──
+                //
+                // THE BUG THIS FIXES: «Ping all کلا می‌پرد و هیچ کانفیگی پینگ
+                // نمی‌گیرد». If the device has a transient drop the instant the
+                // sweep starts, EVERY TCP handshake in wave 1 refuses, so the old
+                // code marked all of them Unreachable and wave 2 had nothing to
+                // do — the sweep flew by and measured nothing. For My Configs
+                // (permanent, user-trusted nodes) that is a terrible outcome: the
+                // user pressed PING ALL and got a wall of red for a link glitch.
+                //
+                // So: if the pre-gate rejected EVERYTHING, we DON'T trust it — we
+                // hand the whole list to the deep prober unchanged (the deep probe
+                // has its own, more forgiving reachability logic and retry). The
+                // pre-gate only gets to reject when it also let SOMETHING through,
+                // which is the case where its verdict is trustworthy.
+                val anyLive = gatedRaw.any { it.third >= 0L }
+                val gated = if (anyLive) {
+                    gatedRaw.mapNotNull { (key, cfg, doorMs) ->
+                        if (doorMs >= 0L) {
+                            Triple(key, cfg, doorMs)
+                        } else {
+                            applyResult(key, Pinger.UNREACHABLE)
+                            bump()
+                            null
+                        }
+                    }
+                } else {
+                    // Everything refused — almost certainly a link blip, not 200
+                    // simultaneously-dead nodes. Deep-probe them all in list order.
+                    gatedRaw.map { (key, cfg, _) -> Triple(key, cfg, Long.MAX_VALUE) }
+                }
 
                 // ── v6.7: ORDER THE DEEP WAVE BY REAL MEASURED PROXIMITY ─────
                 //

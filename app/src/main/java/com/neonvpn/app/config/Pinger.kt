@@ -71,28 +71,31 @@ object Pinger {
      * combined). Callers must treat [ping] as already-bounded and must NOT wrap
      * it in a shorter timeout (that was the v4.2 starvation bug).
      *
-     * v6.6 — 12 s → 9 s. The pre-gate already removed the dead nodes that needed
-     * the long tail, and the zero-DNS probe made each surviving sample several
-     * times cheaper, so a shorter ceiling now rejects only genuinely unusable
-     * nodes while making the sweep dramatically faster. A node that cannot prove
-     * itself in 9 s over the real outbound would be a miserable connection.
+     * v6.8 — 9 s → 6 s. The whole point of v6.8 is SPEED. The TCP pre-gate has
+     * already thrown away every dead node, so a survivor either answers over the
+     * real outbound in a couple of seconds or it is being actively reset — and a
+     * node that needs longer than 6 s to prove itself would be a miserable VPN
+     * anyway. A tighter ceiling here is the single largest contributor to the
+     * "پینگ گرفتن سریع شد" fix, because the sweep's wall-clock is dominated by the
+     * dying nodes that used to burn the FULL budget each.
      */
-    const val PER_CONFIG_BUDGET_MS = 9_000L
+    const val PER_CONFIG_BUDGET_MS = 6_000L
 
     /**
      * Per single probe attempt ceiling (one endpoint, one round-trip).
-     * v6.6 — 5 s → 3.5 s: with DNS removed from the path, a probe that has not
-     * answered in 3.5 s is not "slow", it is being reset.
+     * v6.8 — 3.5 s → 2.5 s: with DNS removed from the path, a probe that has not
+     * answered in 2.5 s is not "slow", it is being reset. Abandon it and move on.
      */
-    private const val PER_PROBE_BUDGET_MS = 3_500L
+    private const val PER_PROBE_BUDGET_MS = 2_500L
 
     /**
-     * v6.6 — budget for the Stage-2 payload verdict. Deliberately generous: this
-     * is a FULL fresh handshake plus a real body, and it is the single most
-     * important measurement we take, because it is the one that decides whether
-     * the user is about to have a working connection.
+     * v6.8 — budget for the Stage-2 payload verdict. 5 s → 3.5 s. It is still a
+     * full fresh handshake plus a real body — the single most important
+     * measurement — but v6.8 issues it as ONE lightweight probe (the zero-DNS IP
+     * literal only) instead of walking a list of heavier endpoints, so the
+     * generous budget it used to need is gone.
      */
-    private const val VERDICT_BUDGET_MS = 5_000L
+    private const val VERDICT_BUDGET_MS = 3_500L
 
     /**
      * Pause before the verdict connection. Long enough that the probe MUST open
@@ -130,22 +133,33 @@ object Pinger {
      * Round-trips taken against the SAME reference endpoint, whose MEDIAN
      * becomes the reported ping.
      *
-     * v6.6 — 4 → 3. The Stage-2 payload verdict now carries the reliability
-     * burden, so extra latency samples bought accuracy we did not need at a cost
-     * (sweep time) we could not afford. Three samples still give a median that
-     * is immune to a single outlier.
+     * v6.8 — 3 → 2. Each sample is a full native-core round-trip, so it is by far
+     * the most expensive thing the sweep does. The Stage-2 payload verdict is the
+     * measurement that actually decides "does this connect", so it carries the
+     * reliability burden; the latency samples only need to produce a stable
+     * NUMBER to display. Two warm-vs-cold samples give exactly that (we discard
+     * the cold one and report the other), while cutting the per-config core
+     * spin-ups by a third. This is a direct, measured speed-up of every sweep.
      */
-    private const val SAMPLE_COUNT = 3
+    private const val SAMPLE_COUNT = 2
 
     /** Latency upper bound for a node we still treat as "reachable". */
     private const val MAX_VALID_MS = 8_000L
 
     /**
      * How many of the [SAMPLE_COUNT] round-trips must SUCCEED before a node may
-     * proceed to the verdict stage. Two, not one: a dead-but-answering node
-     * reliably passes ONE tiny 204 and then stops.
+     * proceed to the verdict stage.
+     *
+     * v6.8 — ONE, not two. The real "does a dead-but-answering node get through?"
+     * defence is now the Stage-2 payload verdict (a FRESH connection carrying
+     * REAL bytes), which a node that survives only its first tiny 204 cannot
+     * pass. Requiring two latency samples on top of that was double-charging the
+     * most expensive step for a guarantee the verdict already gives — and it
+     * discarded usable high-RTT Iranian nodes whose second sample happened to be
+     * reset. One good latency sample to lock the endpoint + the payload verdict
+     * is both faster AND catches more real nodes.
      */
-    private const val MIN_GOOD_SAMPLES = 2
+    private const val MIN_GOOD_SAMPLES = 1
 
     /** Failed round-trips tolerated while sampling before abandoning the endpoint. */
     private const val MAX_SAMPLE_FAILS = 2
@@ -232,12 +246,12 @@ object Pinger {
             // sees "120 in the list → 1000 after connecting".
             //
             // The FIRST sample is always the cold one: it pays for the full TCP +
-            // TLS/Reality handshake through a brand-new core. Every later sample
-            // rides the warmed-up path — exactly the state the tunnel is in once
-            // connected. So when we have enough samples we DROP the cold one and
-            // take the median of the warm rest; [XrayManager.measureDelayStable]
-            // does the identical thing, so the two figures describe the same thing.
-            val warm = if (samples.size >= 3) samples.drop(1) else samples
+            // TLS/Reality handshake through a brand-new core. A later sample rides
+            // the warmed-up path — exactly the state the tunnel is in once
+            // connected. So when we have more than one sample we DROP the cold one
+            // and report the warm rest; [XrayManager.measureDelayStable] does the
+            // identical thing, so the list figure and the connected figure agree.
+            val warm = if (samples.size >= 2) samples.drop(1) else samples
             median(warm)
         }
         result ?: UNREACHABLE

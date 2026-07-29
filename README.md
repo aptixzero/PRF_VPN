@@ -28,10 +28,40 @@ selected server. Only **VLESS** and **VMESS** configs are supported.
 
 The latest signed universal APK is published on the
 [Releases](https://github.com/aptixzero/my_prFF_vP_N/releases/latest) page and mirrored
-in [`build/`](./build). The current artifact is `ProfessorVPN-v6.7-universal.apk`.
+in [`build/`](./build). The current artifact is `ProfessorVPN-v6.8-universal.apk`.
 Free configs are fetched live from the **70** public feeds in `LiveSources.kt`.
 
-### What's new in v6.7 — see [`RELEASE_NOTES_v6.7.md`](./RELEASE_NOTES_v6.7.md)
+### What's new in v6.8 — see [`RELEASE_NOTES_v6.8.md`](./RELEASE_NOTES_v6.8.md)
+
+v6.8 is the **"make it fast again"** release. It answers one blunt report —
+*"the updates made pinging, Auto Test and adding configs painfully slow; I wait
+over 5 minutes and the app no longer feels fast and stable like v4.2."*
+
+- **Every ping now spins ~3 native cores instead of ~5.** Each real ping builds
+  a throwaway native Xray core, and the count per config is what dominated the
+  wait. v6.8 takes **2** latency samples instead of 3, and — the big one — the
+  Stage-2 payload verdict now issues **one** zero-DNS probe instead of looping
+  over up to three heavy payload URLs (a node that only answered the last one
+  used to pay three full cores). Budgets are tighter too, so a *dying* node stops
+  burning the long tail. The verdict is still a fresh connection carrying real
+  bytes, so *"if it pings, it connects"* stays true — we just stopped paying for
+  it several times over.
+- **Wider deep gates, because each config is now cheaper.** Manual PING ALL runs
+  **6–12** deep probes at once (was 4–8) and Auto Test **5–10** (was 3–6), so the
+  live survivors are measured with real parallelism and low-ping configs land in
+  My Configs within seconds.
+- **"Ping All fires but pings nothing" in My Configs — fixed.** If a momentary
+  link drop makes the wide TCP pre-gate reject *every* node, v6.8 no longer
+  trusts it — it hands the whole list straight to the real prober instead of
+  painting everything red. The pre-gate may only reject when it also let
+  something through.
+
+Everything measured is still **real** — no `Random`, no proxies, Cloudflare-only
+probe endpoints, only VLESS/VMESS. The connection core (health check, device-path
+watchdog, IPv4-only TUN, BBR, QUIC-block) is untouched.
+
+<details>
+<summary>What was new in v6.7</summary>
 
 v6.7 is the release that made **Auto Test** produce **low-ping** configs, and
 produce them **fast**. It answers one report — *"Auto Test finds sources at
@@ -76,6 +106,8 @@ Everything measured is real — no `Random`, no proxies, Cloudflare-only probe
 endpoints. The TCP measurement introduced here may **only reject or order**; it
 is never displayed and never stored as a ping. Every number you see still comes
 from the full three-stage `Pinger` pipeline, payload verdict included.
+
+</details>
 
 <details>
 <summary>What was new in v6.6</summary>
