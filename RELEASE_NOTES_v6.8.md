@@ -102,3 +102,13 @@ mean low-ping configs land in My Configs within seconds of pressing Auto Test.
 ## Only VLESS & VMESS. No proxies. Cloudflare-only probes. No ad scripts.
 
 All unchanged and still enforced.
+
+---
+
+## Shipping record
+
+* **versionName** `6.8` / **versionCode** `49`
+* Built by GitHub Actions on `main` push (native Xray + hev-socks5-tunnel, universal ABI)
+* Signed universal APK published on **Release v6.8** and committed under `build/ProfessorVPN-v6.8-universal.apk`
+* Direct download: <https://github.com/aptixzero/my_prFF_vP_N/releases/download/v6.8/ProfessorVPN-v6.8-universal.apk>
+* Both `main` (اصلی) and `genspark_ai_developer` (فرعی) branches updated
