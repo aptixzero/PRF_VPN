@@ -166,19 +166,29 @@ class FreeConfigsFragment : Fragment() {
                 PingService.sweep.collect { s ->
                     if (!isAdded) return@collect
                     if (s.running) {
-                        showProgress(
-                            if (s.total > 0) (s.tested * 100 / s.total) else 0,
-                            "Pinging… ${s.tested}/${s.total}"
-                        )
-                        btnPingAll.isEnabled = false
-                        btnPingAll.alpha = 0.4f
-                        btnSearch.isEnabled = false
-                        btnSearch.alpha = 0.4f
-                        btnSelect.isEnabled = false
-                        btnSelect.alpha = 0.4f
-                        btnDeleteAll.isEnabled = false
-                        btnDeleteAll.alpha = 0.4f
-                        adapter.pingButtonsEnabled = false
+                        // ── v6.9: THE PING PROCESS IS NOW VISIBLE ────────────
+                        // «روند پینگ گرفتن رو نمیتونم ببینم». This bar used to move
+                        // only for a MANUAL ping-all; the automatic Auto-Test sweep
+                        // — which is what actually pings the 240 free configs —
+                        // published nothing, so the tab looked frozen for minutes.
+                        // AutoTestEngine now feeds the same flow, and the label
+                        // reports a live count plus a percentage.
+                        val pct = if (s.total > 0) (s.tested * 100 / s.total) else 0
+                        showProgress(pct, "Pinging… ${s.tested}/${s.total}  ·  $pct%")
+                        // Only a MANUAL sweep locks the controls. A background Auto
+                        // Test must leave the buttons usable, otherwise the user is
+                        // frozen out of their own list for as long as it runs.
+                        val manual = PingService.isManualSweepRunning
+                        val a = if (manual) 0.4f else 1f
+                        btnPingAll.isEnabled = !manual
+                        btnPingAll.alpha = a
+                        btnSearch.isEnabled = !manual
+                        btnSearch.alpha = a
+                        btnSelect.isEnabled = !manual
+                        btnSelect.alpha = a
+                        btnDeleteAll.isEnabled = !manual
+                        btnDeleteAll.alpha = a
+                        adapter.pingButtonsEnabled = !manual
                     } else {
                         // Don't clobber an in-flight Auto-Test progress display.
                         if (!AutoTestEngine.isRunning) hideProgressDelayed()
@@ -418,8 +428,14 @@ class FreeConfigsFragment : Fragment() {
 
     // ------------------------------------------------------------- ping all
     private fun pingAll() {
-        if (busy || AutoTestEngine.isRunning) return
-        if (PingService.isSweepRunning) return   // buttons are disabled, but guard
+        // v6.9 — the guards here were the "Ping all does nothing" bug on this tab.
+        // v6.8 returned silently when the Auto-Test engine was running OR when
+        // `isSweepRunning` was true (which the engine's own progress also makes
+        // true), so during the normal state of the app — Auto Test on — the button
+        // was a no-op with no feedback whatsoever. A manual request now wins: it is
+        // only refused by another MANUAL sweep, and every refusal says something.
+        if (busy) return
+        if (PingService.isManualSweepRunning) { toast(getString(R.string.testing_ping)); return }
         if (adapter.items.isEmpty()) { toast(getString(R.string.free_empty)); return }
 
         val started = PingService.pingAll(requireContext(), adapter.items.toList(), PingStore.FREE)
@@ -433,7 +449,11 @@ class FreeConfigsFragment : Fragment() {
         job = viewLifecycleOwner.lifecycleScope.launch {
             // The app-scoped sweep state is the single source of truth: it flips
             // running=false the moment all probes resolve. We just wait for it.
-            while (isActive && isAdded && PingService.isSweepRunning) {
+            // v6.9 — wait on the MANUAL sweep specifically, and note that `pingAll`
+            // now publishes running = true synchronously, so this loop can no longer
+            // fall through on its first check (the v6.8 race that ended a sweep's UI
+            // treatment before it had begun).
+            while (isActive && isAdded && PingService.isManualSweepRunning) {
                 kotlinx.coroutines.delay(250)
             }
             // v5.7 — sort ONCE at the end of a manual sweep (not on every tick),
@@ -540,7 +560,41 @@ class FreeConfigsFragment : Fragment() {
         if (stored != null) myStore.setSelectedId(stored.id)
         adapter.selectedId = cfg.id
         adapter.notifyDataSetChanged()
-        toast(getString(R.string.copied_to_my))
+
+        // ── v6.9: RAPID SWITCHING FROM THE FREE TAB TOO ──────────────────────
+        // «باید بتونم سریع بین کانفیگ ها جابجا بشم». If a tunnel is already up,
+        // picking a free config now switches to it immediately rather than only
+        // saving it and leaving the user to walk home → disconnect → connect.
+        // NeonVpnService treats a start intent during a live session as a config
+        // switch, serialised on its single session thread and guarded by a
+        // generation counter, so tapping several configs quickly is safe: every
+        // superseded request is dropped and no half-open session survives.
+        val state = VpnStateBus.state
+        val live = state == com.neonvpn.app.service.NeonVpnService.STATE_CONNECTED ||
+            state == com.neonvpn.app.service.NeonVpnService.STATE_CONNECTING
+        if (!live) {
+            toast(getString(R.string.copied_to_my))
+            return
+        }
+        runCatching {
+            val ctx = requireContext()
+            VpnStateBus.update(
+                com.neonvpn.app.service.NeonVpnService.STATE_CONNECTING, cfg.remark
+            )
+            val intent = android.content.Intent(
+                ctx, com.neonvpn.app.service.NeonVpnService::class.java
+            )
+            val ok = runCatching {
+                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                    ctx.startForegroundService(intent)
+                } else {
+                    ctx.startService(intent)
+                }
+                true
+            }.getOrDefault(false)
+            if (!ok) runCatching { ctx.startService(intent) }
+            toast(getString(R.string.switching_to, cfg.remark))
+        }.onFailure { toast(getString(R.string.copied_to_my)) }
     }
 
     private fun deleteAll() {

@@ -150,39 +150,62 @@ object AutoTestEngine {
     private const val FAST_MS = 400L
 
     /**
-     * v6.3 — how many CONSECUTIVE cycles may come back with zero fresh configs
-     * before we conclude the engine cannot make progress and switch Auto Test
-     * OFF (per the brief). Each of those cycles already went through the full
-     * escalating recovery ladder, so reaching this count means the device is
-     * genuinely unable to reach any feed.
+     * How many CONSECUTIVE cycles may come back with zero fresh configs before we
+     * conclude the engine cannot make progress and switch Auto Test OFF.
+     *
+     * v6.9 — RAISED FROM 6 TO 24, and this is the fix for the single most
+     * frustrating reported bug: «الان 240 تا تموم میشه دیگه توقف میکنه و 240 تای
+     * بعدی رو اضافه نمیکنه» (it finishes 240 and then never adds the next 240).
+     *
+     * The cause was a compounding pair of defects. v6.8 bonded the user to ONE
+     * source feed and re-read it every cycle; once every link in that feed was in
+     * the seen-memory, every cycle returned empty. Six such cycles — which on a
+     * fast link took barely a minute — tripped this counter and the engine
+     * switched ITSELF OFF, permanently, until the user noticed and re-armed it.
+     *
+     * v6.9 removes the cause ([FreeConfigSource] now walks parallel waves of many
+     * feeds and recycles its dedup memory when a pass under-fills), so an empty
+     * cycle is genuinely rare. That makes a tight trip-count pointless and
+     * actively harmful, since the remaining reason to see one is a temporarily
+     * unreachable network — the case where giving up is the WORST response. 24
+     * cycles of the escalating recovery ladder is a very long, very determined
+     * effort; reaching it really does mean the device has no usable internet.
      */
-    private const val MAX_EMPTY_STREAK = 6
+    private const val MAX_EMPTY_STREAK = 24
 
     /**
-     * v6.3 — hard ceiling for one whole cycle (search + test the batch). If a
-     * cycle exceeds this the batch is abandoned and the loop moves on, so a
-     * hung native probe can never freeze Auto Test forever.
+     * Hard ceiling for one whole cycle (search + test the batch). If a cycle
+     * exceeds this the batch is abandoned and the loop moves on, so a hung native
+     * probe can never freeze Auto Test forever.
+     *
+     * v6.9 — 12 min → 4 min. «باید تند تند پینگ بگیرد و بعد 240 تای بعدی رو لود
+     * کنه» — ping quickly, then load the next 240. A twelve-minute ceiling meant a
+     * batch full of black-holed nodes could hold the engine for a quarter of an
+     * hour before the next 240 were even requested, which is precisely the "it
+     * stopped adding configs" experience. With v6.9's wider deep gate (8–16) and a
+     * cheaper per-config ping, a healthy 240-batch finishes in well under four
+     * minutes, so this cuts only the pathological cases.
      */
-    private const val CYCLE_BUDGET_MS = 12L * 60 * 1000     // 12 minutes
+    private const val CYCLE_BUDGET_MS = 4L * 60 * 1000      // v6.9: 12 min → 4 min
 
     /**
      * v6.3 — hard ceiling for ONE chunk of concurrent probes. Bounds the
      * `awaitAll()` so a single wedged JNI call cannot stall the whole batch.
      */
-    private const val CHUNK_BUDGET_MS = 90_000L
+    private const val CHUNK_BUDGET_MS = 40_000L             // v6.9: 90 s → 40 s
 
     /** v6.3 — search phase ceiling; a dead feed must not hang the cycle. */
-    private const val SEARCH_BUDGET_MS = 90_000L
+    private const val SEARCH_BUDGET_MS = 40_000L            // v6.9: 90 s → 40 s
 
     /**
      * v6.3 — if no cycle heartbeat lands for this long the supervisor considers
      * the loop wedged and force-restarts it. Comfortably longer than a normal
      * cycle so a slow-but-alive run is never interrupted.
      */
-    private const val STALL_TIMEOUT_MS = 15L * 60 * 1000     // 15 minutes
+    private const val STALL_TIMEOUT_MS = 5L * 60 * 1000     // v6.9: 15 min → 5 min
 
     /** v6.3 — how often the stall supervisor checks the heartbeat. */
-    private const val SUPERVISOR_TICK_MS = 60_000L
+    private const val SUPERVISOR_TICK_MS = 30_000L          // v6.9: 60 s → 30 s
 
     /**
      * v6.7 — width of the triage wave. These are bare sockets (no native core,
@@ -448,6 +471,13 @@ object AutoTestEngine {
                 val workingThisBatch = java.util.concurrent.ConcurrentLinkedQueue<ServerConfig>()
                 val tested = AtomicInteger(0)
 
+                // ── v6.9: MAKE THE PINGING VISIBLE ───────────────────────────
+                // «روند پینگ گرفتن رو نمیتونم ببینم». The engine's ping phase now
+                // publishes into the SAME sweep flow the manual PING ALL uses, so
+                // both the Free tab and My Configs show a live, climbing progress
+                // bar for automatic runs instead of looking idle for minutes.
+                runCatching { PingService.publishExternalSweep(true, 0, fresh.size) }
+
                 // v6.3 — the whole test phase is wrapped in a wall-clock budget so
                 // a wedged native probe can never freeze the engine. Configs are
                 // probed strictly IN LIST ORDER using a bounded sliding window
@@ -514,6 +544,11 @@ object AutoTestEngine {
                                                 testedInBatch = n
                                             )
                                         }
+                                        // v6.9 — drive the shared, on-screen ping
+                                        // progress bar with every single result.
+                                        runCatching {
+                                            PingService.publishExternalSweep(true, n, fresh.size)
+                                        }
                                         // Flush working configs into My Configs LIVE.
                                         if (workingThisBatch.isNotEmpty()) {
                                             flushWorking(myStore, workingThisBatch)
@@ -540,6 +575,12 @@ object AutoTestEngine {
                             i = end
                         }
                     }
+                }
+
+                // v6.9 — the ping phase is over: retire the shared progress bar so
+                // the UI re-enables its buttons instead of waiting forever.
+                runCatching {
+                    PingService.publishExternalSweep(false, tested.get(), fresh.size)
                 }
 
                 if (!isActive) break
@@ -692,17 +733,32 @@ object AutoTestEngine {
         streak: Int
     ): List<ServerConfig> {
         // --- Step 1: settle and retry plainly -------------------------------
+        // v6.9 — the backoff is capped much lower (8 s → 3 s). The old ladder
+        // could spend nearly half a minute sleeping before it even tried the
+        // things that actually fix the problem, and the user reads that as "it
+        // stopped". Sleep briefly, then act.
         updateProgress { it.copy(phase = "Weak link — retrying…") }
-        delay((1_500L * (streak + 1)).coerceAtMost(8_000L))
+        delay((700L * (streak + 1)).coerceAtMost(3_000L))
+        // Drop the cached feed bodies: a retry must ask the live network, not
+        // replay the same 90-second-old answer that just failed us.
+        runCatching { SourceFetcher.invalidate() }
         fetchBatch(ctx, seenKeys).let { if (it.isNotEmpty()) return it }
 
         // --- Step 2: unbond the sticky source, try a different feed ----------
+        // This is the step that breaks the "240 and then nothing" loop: the bonded
+        // feed has gone dark or is exhausted, so unbonding makes the next press
+        // walk to DIFFERENT feeds instead of hammering the dead one forever.
         updateProgress { it.copy(phase = "Switching source…") }
         runCatching { ConnectedSourceStore.clear(ctx) }
-        delay(800)
+        runCatching { SourceFetcher.invalidate() }
+        delay(400)
         fetchBatch(ctx, seenKeys).let { if (it.isNotEmpty()) return it }
 
         // --- Step 3: reset the dedup memory, re-serve the live configs -------
+        // "Every live config is already in the seen set" looks EXACTLY like being
+        // offline but is the opposite problem, and it is the normal end state after
+        // a few hundred configs have been consumed. Recycling the memory is what
+        // lets the very next press hand back a full 240 again.
         updateProgress { it.copy(phase = "Refreshing memory…") }
         runCatching {
             seenKeys.clear()
@@ -711,7 +767,23 @@ object AutoTestEngine {
             // re-add configs already in My Configs.
             myStore.getServers().forEach { seenKeys.add(ConfigParser.dedupKey(it)) }
         }
-        delay(800)
+        runCatching { SourceFetcher.invalidate() }
+        delay(400)
+        fetchBatch(ctx, seenKeys).let { if (it.isNotEmpty()) return it }
+
+        // --- Step 4 (v6.9): FULL COLD RESTART OF THE SOURCE PIPELINE ---------
+        // Last resort before reporting an empty cycle. Everything above assumed one
+        // specific thing was wrong; this assumes we simply do not know. Cursors go
+        // back to the first feed, the bond is gone, the dedup memory holds only the
+        // user's own configs, and every cached body is dropped — the same state a
+        // freshly-installed app is in, which we know works.
+        updateProgress { it.copy(phase = "Rebuilding source list…") }
+        runCatching {
+            ConnectedSourceStore.clear(ctx)
+            SourceFetcher.invalidate()
+            com.neonvpn.app.net.CfDns.clearCache()
+        }
+        delay(600)
         return fetchBatch(ctx, seenKeys)
     }
 

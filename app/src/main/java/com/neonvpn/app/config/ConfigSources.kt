@@ -59,15 +59,9 @@ object ConfigSources {
         add(Source("https://raw.githubusercontent.com/ebrasha/free-v2ray-public-list/refs/heads/main/vmess_configs.txt", 0))
         add(Source("https://raw.githubusercontent.com/ebrasha/free-v2ray-public-list/refs/heads/main/vless_configs.txt", 0))
 
-        // mudfish DailyV2ry pastes — refreshed daily, MIXED protocols (parser
-        // keeps only vless + vmess, drops ss/trojan/etc.). base64 blobs.
-        add(Source("https://bin.mudfish.net/r/969-3684-9136", 0))
-        add(Source("https://bin.mudfish.net/r/751-1115-8154", 0))
-        add(Source("https://bin.mudfish.net/r/039-0789-5865", 0))
-        add(Source("https://bin.mudfish.net/r/176-1555-9749", 0))
-        add(Source("https://bin.mudfish.net/r/984-3566-9460", 0))
-        add(Source("https://bin.mudfish.net/r/982-7409-2217", 0))
-        add(Source("https://bin.mudfish.net/r/515-1637-0030", 0))
+        // v6.9 — the third-party paste host that v6.8 used here was DELETED.
+        // The brief forbids ANY intermediary/relay host inside the app; every
+        // remaining source below is a first-party GitHub raw origin.
 
         // ===== TIER 1 — established, regularly-updated aggregators =====
         add(Source("https://raw.githubusercontent.com/V2RayRoot/V2RayConfig/main/Config/vless.txt", 1))

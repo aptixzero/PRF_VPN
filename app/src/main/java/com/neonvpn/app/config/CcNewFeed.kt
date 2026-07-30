@@ -24,11 +24,12 @@ import org.json.JSONObject
  *    in SharedPreferences ([KEY_FILE_COUNT]) with a 24 h TTL. On API failure we
  *    fall back to the last cached value, or to [FALLBACK_FILE_COUNT] (= the live
  *    count at the time of the v3.8 implementation).
- *  • v6.6 — Each file is fetched through a two-hop CDN chain (origin
- *    raw.githubusercontent.com → GitHub's own cdn.jsdelivr.net). Both hops go out
- *    over the shared, pooled, **proxy-free** client, with hostnames resolved by
- *    Cloudflare DoH so a poisoned ISP resolver cannot hide the origin. The
- *    third-party `gitcdn.link` forwarder that v6.5 used was removed.
+ *  • v6.9 — ZERO INTERMEDIARIES. Each file is fetched from its ORIGIN only
+ *    (raw.githubusercontent.com). Every third-party mirror / CDN forwarder that
+ *    earlier versions chained through was deleted: the user's traffic must leave
+ *    their device and hit the origin directly, with hostnames resolved by
+ *    Cloudflare DoH (1.1.1.1) so a poisoned ISP resolver cannot hide it.
+ *    `Proxy.NO_PROXY` is pinned on the client — no proxy, ever.
  *
  * Lazy / bounded:
  *  • Only ONE file is held in memory at a time.
@@ -155,25 +156,20 @@ object CcNewFeed {
     }
 
     /**
-     * v6.6 — CDN fallback mirror chain for one file, in priority order:
-     *   1. raw.githubusercontent.com   (origin — reached DIRECTLY, resolved by
-     *      Cloudflare DoH inside [FeedCache], so ISP DNS poisoning can't hide it)
-     *   2. cdn.jsdelivr.net/gh         (GitHub's own immutable edge CDN)
+     * v6.9 — **ORIGIN ONLY.** One URL, no mirrors, no proxies, no borrowed CDNs.
      *
-     * The v6.5 third mirror `gitcdn.link` was REMOVED in v6.6: it is a
-     * third-party request-forwarding service (i.e. a proxy), which the v6.6
-     * brief forbids outright — such hops are slow, frequently dead, and they
-     * terminate TLS on someone else's box. Each dead mirror also cost a full
-     * ~9 s connect timeout before the chain moved on, so dropping it makes the
-     * feed measurably FASTER as well as safer. The real blocker in Iran is DNS
-     * poisoning of the origin, and that is now solved at the resolver layer by
-     * [com.neonvpn.app.net.CfDns] rather than by borrowing someone's proxy.
+     * Every intermediary host has now been removed from this project's network
+     * paths, per the v6.9 brief. It is also strictly faster: on a link where the
+     * origin is blocked the mirror was normally blocked as well, so the chain only
+     * ever added a second full timeout before failing the same way.
+     *
+     * The direct fetch is reachable because [com.neonvpn.app.net.CfDns] resolves
+     * the host over encrypted Cloudflare DoH — defeating the DNS poisoning that is
+     * the actual blocking mechanism — and dials the true origin with full
+     * certificate validation.
      */
     fun mirrorChain(index: Int): List<String> {
         val name = fileName(index)
-        return listOf(
-            "https://raw.githubusercontent.com/$REPO/$BRANCH/$name",
-            "https://cdn.jsdelivr.net/gh/$REPO@$BRANCH/$name"
-        )
+        return listOf("https://raw.githubusercontent.com/$REPO/$BRANCH/$name")
     }
 }

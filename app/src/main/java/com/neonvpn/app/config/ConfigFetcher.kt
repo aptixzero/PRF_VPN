@@ -282,7 +282,7 @@ object ConfigFetcher {
             val req = okhttp3.Request.Builder()
                 .url(urlStr)
                 .head()
-                .header("User-Agent", "ProfessorVPN/6.6 (Android)")
+                .header("User-Agent", "ProfessorVPN/6.9 (Android)")
                 .build()
             com.neonvpn.app.net.DirectHttp.client.newCall(req).execute().use { resp ->
                 val lm = resp.headers.getDate("Last-Modified")?.time ?: -1L
@@ -294,75 +294,23 @@ object ConfigFetcher {
     }
 
     /**
-     * Fetch a source URL. On Iranian mobile-data, `raw.githubusercontent.com` is
-     * frequently throttled/poisoned, so a direct GET silently times out — this
-     * is why "configs are found on WiFi but not on SIM data". We therefore try
-     * the original URL first and, if it fails, retry through a set of public
-     * GitHub mirrors / CDNs that stay reachable on disrupted mobile links. The
-     * first mirror that returns a usable body wins.
+     * v6.9 — fetch a source URL **DIRECTLY, and only directly.**
+     *
+     * There is exactly ONE candidate: the origin. v6.8 still appended a
+     * third-party content CDN here as a "fallback"; the v6.9 brief forbids any
+     * intermediary in the config path, and the fallback was also a pure cost —
+     * on a link where the origin is unreachable the mirror almost always was too,
+     * so the user paid a second full timeout to learn nothing.
+     *
+     * What makes the DIRECT fetch actually work on an Iranian ISP is
+     * [com.neonvpn.app.net.CfDns]: the dominant block is DNS poisoning, so we
+     * resolve over encrypted Cloudflare DoH and dial the true origin address with
+     * full certificate validation. No third party ever sees or can alter a config.
      */
-    private fun fetch(urlStr: String): String? {
-        for (candidate in mirrorCandidates(urlStr)) {
-            val body = try { fetchOne(candidate) } catch (e: Throwable) {
-                Log.w(TAG, "fetch failed for $candidate: ${e.message}"); null
-            }
-            if (!body.isNullOrBlank()) return body
-        }
-        return null
-    }
-
-    /** Build an ordered list of URLs to try: the original first, then mirrors.
-     *
-     *  On disrupted Iranian links, the origin host (GitHub raw, mudfish, …) is
-     *  frequently throttled or DNS-poisoned, which is why "configs load on WiFi
-     *  but not on SIM data / when GitHub is blocked". We therefore always append
-     *  a set of edge-cached CDNs and generic reverse proxies. The first mirror
-     *  that returns a usable body wins, so the configs can still be pulled even
-     *  when the origin is unreachable. */
-    /**
-     * v6.6 — **NO PROXIES.** Origin + GitHub's own CDN, nothing else.
-     *
-     * REMOVED: `ghproxy.net`, `gh.api.99988866.xyz`, `cors.isomorphic-git.org`,
-     * `r.jina.ai`, `api.allorigins.win`. They are third-party reverse proxies that
-     * saw every config before the user did, they are rate-limited, and they are
-     * themselves throttled/blocked from Iran — so each one had to time out (~9 s)
-     * before the next was tried. Five of those in series is most of a minute
-     * wasted per source, which is a large part of why fetching felt so slow.
-     *
-     * REPLACED BY: encrypted Cloudflare-DoH resolution in
-     * [com.neonvpn.app.net.CfDns]. The dominant block on Iranian ISPs is DNS
-     * poisoning, so resolving over DoH and dialling the true origin directly makes
-     * the ORIGIN work in exactly the case that previously needed a proxy — with no
-     * third party able to read or alter the configs.
-     *
-     * `cdn.jsdelivr.net` remains as the one fallback: not a proxy, but GitHub's
-     * immutable content CDN serving the same repository file from its own edge.
-     */
-    private fun mirrorCandidates(urlStr: String): List<String> {
-        val out = LinkedHashSet<String>()
-        out.add(urlStr)
-
-        // raw.githubusercontent.com/<user>/<repo>/<branch>/<path>
-        val rawPrefix = "https://raw.githubusercontent.com/"
-        if (urlStr.startsWith(rawPrefix)) {
-            val rest = urlStr.substring(rawPrefix.length)            // user/repo/branch/path...
-            val parts = rest.split('/')
-            if (parts.size >= 4) {
-                val user = parts[0]; val repo = parts[1]; val branch = parts[2]
-                val path = parts.drop(3).joinToString("/")
-                out.add("https://cdn.jsdelivr.net/gh/$user/$repo@$branch/$path")
-            }
-        }
-
-        return out.toList()
-    }
-
-    /**
-     * v6.6 — one shared, pooled, proxy-free client
-     * ([com.neonvpn.app.net.DirectHttp]): Cloudflare-DoH resolution, HTTP/2 and
-     * TLS session reuse, so parallel feed fetches share connections instead of
-     * paying a fresh handshake each.
-     */
-    private fun fetchOne(urlStr: String): String? =
+    private fun fetch(urlStr: String): String? = try {
         com.neonvpn.app.net.DirectHttp.get(urlStr)
+    } catch (e: Throwable) {
+        Log.w(TAG, "fetch failed for $urlStr: ${e.message}")
+        null
+    }
 }

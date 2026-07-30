@@ -527,8 +527,10 @@ actually up. The retry ramp starts at **120 ms** (v6.5 used 300–900 ms).
 
 Every public forwarder was deleted in v6.6: `r.jina.ai`, `api.allorigins.win`,
 `ghproxy.net`, `cors.isomorphic-git.org`, `gh.api.99988866.xyz`,
-`cdn.statically.io`, `gitcdn.link`. **Do not add another one, ever**, and do not
-"temporarily" reintroduce one to fix a fetch failure.
+`cdn.statically.io`, `gitcdn.link`. v6.9 removed the last two survivors as well:
+the `cdn.jsdelivr.net` CDN mirror and the `bin.mudfish.net` paste host.
+**Do not add another one, ever**, and do not "temporarily" reintroduce one to fix
+a fetch failure. There is now EXACTLY ONE candidate URL per source: the origin.
 
 They are third-party servers that see and can rewrite every config the user is
 about to route their traffic through; they are rate-limited and mostly blocked
@@ -551,8 +553,12 @@ reachable once you learn its true address. So:
 **All new network code must go through `DirectHttp`.** Do not open a fresh
 `HttpURLConnection` for a feed fetch — you lose DoH resolution, the
 `NO_PROXY` guarantee, and the connection pool that makes many small fetches fast.
-The only remaining fallback mirror is `cdn.jsdelivr.net` (GitHub's own immutable
-CDN — not a forwarder).
+As of v6.9 there is **no fallback mirror at all**. `cdn.jsdelivr.net` was removed
+too: whether or not it counts as "a proxy", it is still somebody else's server
+sitting between the user and their config list, and a dead mirror still cost a
+full extra timeout on every dead source. The replacement for mirror-chaining is
+PARALLELISM — `SourceFetcher` + `FreeConfigSource` open many ORIGIN feeds at once
+(waves of 8), so one wave costs one timeout instead of eight.
 
 Exempt from `DirectHttp`, by design: `CfDns` itself (it must not recurse into the
 client that depends on it) and the geo-IP / counter helpers in

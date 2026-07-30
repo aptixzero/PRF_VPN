@@ -81,7 +81,7 @@
   function defaultModel() {
     return {
       version: 1,
-      latestApkVersion: "6.7",
+      latestApkVersion: "6.9",
       appLogo: { url: "" },
       inAppTelegramUrl: "",
       contact: {
@@ -138,7 +138,7 @@
     setVal("bn-text", bn.text || "");
     if (bn.textColor) setVal("bn-color", bn.textColor);
     setVal("bn-url", bn.url || "");
-    setVal("hm-apk", cfg.latestApkVersion || "6.7");
+    setVal("hm-apk", cfg.latestApkVersion || "6.9");
     // donate tab
     var dn = cfg.donate || {};
     setVal("dn-heading", dn.heading || "");
@@ -192,7 +192,7 @@
     m.version = (prevVersion || 0) + 1;
     m.ts = Date.now();
     m.lastUpdatedAt = Date.now();
-    m.latestApkVersion = trimv("hm-apk") || "6.7";
+    m.latestApkVersion = trimv("hm-apk") || "6.9";
 
     var inapp = trimv("ln-inapp");
     m.inAppTelegramUrl = inapp;

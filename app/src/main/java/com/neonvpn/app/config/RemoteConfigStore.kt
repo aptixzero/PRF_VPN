@@ -5,7 +5,6 @@ import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
-import java.net.URL
 
 /**
  * Fetches + caches the [RemoteConfig] published by the admin panel.
@@ -135,68 +134,35 @@ object RemoteConfigStore {
         snapshot.forEach { try { it(cfg) } catch (_: Throwable) {} }
     }
 
-    /** Try the origin first, then a couple of edge mirrors that survive in Iran. */
+    /**
+     * v6.9 — **ORIGIN ONLY.** Every third-party mirror host was deleted from this
+     * function.
+     *
+     * The v6.9 brief forbids any intermediary or proxy in the app's network path,
+     * and this was the last place still holding a list of them. It was also slow:
+     * on a link where the origin is blocked, the mirrors were normally blocked
+     * too, so the panel fetch paid three or four extra full timeouts before giving
+     * up — on the SPLASH SCREEN, which is why the app used to feel sluggish before
+     * it had even opened.
+     *
+     * The direct fetch works because [com.neonvpn.app.net.CfDns] resolves the host
+     * over encrypted Cloudflare DoH and dials the true origin, which defeats the
+     * DNS poisoning that was the real reason a direct fetch failed.
+     */
     private fun fetchWithMirrors(urlStr: String): String? {
-        val candidates = mutableListOf(urlStr)
-        // github pages → jsDelivr mirror of the same repo file
-        // https://<user>.github.io/<repo>/<path>  →  cdn.jsdelivr.net/gh/<user>/<repo>@main/<path>
-        try {
-            val u = URL(urlStr)
-            when {
-                // https://<user>.github.io/<repo>/<path> → jsDelivr mirror
-                u.host.endsWith("github.io") -> {
-                    val user = u.host.substringBefore(".github.io")
-                    val parts = u.path.trimStart('/').split('/')
-                    if (parts.isNotEmpty()) {
-                        val repo = parts[0]
-                        val path = parts.drop(1).joinToString("/")
-                        candidates.add("https://cdn.jsdelivr.net/gh/$user/$repo@main/$path")
-                        candidates.add("https://fastly.jsdelivr.net/gh/$user/$repo@main/$path")
-                    }
-                }
-                // https://raw.githubusercontent.com/<user>/<repo>/<branch>/<path>
-                //   → jsDelivr mirror of the same file (survives DPI better in Iran)
-                u.host == "raw.githubusercontent.com" -> {
-                    val p = u.path.trimStart('/').split('/')
-                    if (p.size >= 4) {
-                        val user = p[0]; val repo = p[1]; val branch = p[2]
-                        val path = p.drop(3).joinToString("/")
-                        candidates.add("https://cdn.jsdelivr.net/gh/$user/$repo@$branch/$path")
-                        candidates.add("https://fastly.jsdelivr.net/gh/$user/$repo@$branch/$path")
-                        candidates.add("https://gcore.jsdelivr.net/gh/$user/$repo@$branch/$path")
-                    }
-                }
-            }
-        } catch (_: Throwable) {}
-        // v6.6 — `https://r.jina.ai/…` was REMOVED here. It is a third-party
-        // reverse proxy that saw every panel fetch, it is rate-limited, and it is
-        // throttled from Iran, so it usually just added a full timeout before
-        // failing. The panel now loads reliably without it because
-        // [com.neonvpn.app.net.CfDns] resolves the origin over encrypted
-        // Cloudflare DoH, defeating the DNS poisoning that was the real reason the
-        // direct fetch failed. jsDelivr (GitHub's own CDN, not a proxy) remains as
-        // the fallback above.
-
-        // Ensure every candidate is cache-busted so a fresh Publish is never
-        // served from a stale CDN edge copy.
+        // Cache-bust so a freshly published panel config is never served stale.
         val bust = "t=" + System.currentTimeMillis()
-        val busted = candidates.map { c ->
-            if (c.contains("?")) "$c&$bust" else "$c?$bust"
+        val url = if (urlStr.contains("?")) "$urlStr&$bust" else "$urlStr?$bust"
+        val b = try { fetchOne(url) } catch (e: Throwable) {
+            Log.w(TAG, "fetch failed $url: ${e.message}"); null
         }
-
-        for (c in busted) {
-            val b = try { fetchOne(c) } catch (e: Throwable) {
-                Log.w(TAG, "fetch failed $c: ${e.message}"); null
-            }
-            if (!b.isNullOrBlank() && b.contains("{")) return b
-        }
-        return null
+        return if (!b.isNullOrBlank() && b.contains("{")) b else null
     }
 
     /**
-     * v6.6 — routed through the shared proxy-free client so the panel config
-     * benefits from Cloudflare-DoH resolution (works on a poisoned link) and from
-     * connection reuse, and never travels through a third-party proxy.
+     * v6.9 — routed through the shared, proxy-free, intermediary-free client so
+     * the panel config benefits from Cloudflare-DoH resolution (works on a
+     * poisoned link) and from connection reuse.
      */
     private fun fetchOne(urlStr: String): String? =
         com.neonvpn.app.net.DirectHttp.get(urlStr, cacheControl = "no-cache")
