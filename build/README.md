@@ -8,6 +8,8 @@ GitHub Actions workflow `.github/workflows/build.yml` on every push to
   (current: `ProfessorVPN-v6.9-universal.apk`, `versionCode 50`)
 - ABIs bundled in the single APK: `arm64-v8a`, `armeabi-v7a`, `x86_64`, `x86`
   (Android 7.0+ / minSdk 24)
+- APK SHA-256: `feca62786fc7a1570bf95084bbca7696a77b21fb2af73a6b1c01e6449db5a6d8`
+  (byte-identical to the asset published on Release v6.9)
 - Signed with the same release key as v6.7 / v6.8
   (SHA-256 `6a5ed5e3…07eb82d`), so v6.9 installs **over** an existing
   Professor VPN without uninstalling first.

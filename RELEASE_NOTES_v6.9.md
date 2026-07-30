@@ -331,5 +331,7 @@ group is written fastest-first using each config's real measured ping.
   `build/ProfessorVPN-v6.9-universal.apk` (the v6.8 APK was deleted in the same
   commit, so `build/` can never offer a stale download)
 * Direct download: <https://github.com/aptixzero/my_prFF_vP_N/releases/download/v6.9/ProfessorVPN-v6.9-universal.apk>
+* APK SHA-256: `feca62786fc7a1570bf95084bbca7696a77b21fb2af73a6b1c01e6449db5a6d8` — verified byte-identical between
+  `build/`, the CI artifact and the published release asset
 * Both `main` (اصلی) and `genspark_ai_developer` (فرعی) branches updated
 * Admin panel / published `app_config.json`: `latestApkVersion` → `6.9`

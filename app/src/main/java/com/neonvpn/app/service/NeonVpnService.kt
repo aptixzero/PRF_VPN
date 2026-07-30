@@ -1548,7 +1548,21 @@ class NeonVpnService : VpnService() {
         private const val VPN_MTU = 1500
         private const val PRIVATE_VLAN4_CLIENT = "172.19.0.1"
         private const val PRIVATE_VLAN6_CLIENT = "fdfe:dcba:9876::1"
+        /*
+         * v6.9 — Cloudflare ONLY, no Google.
+         *
+         * The secondary resolver used to be Google's 8.8.8.8. Two problems:
+         *   1. Google's DNS is unreliable/filtered on Iranian networks, so the
+         *      secondary was effectively a dead entry that only added timeout
+         *      latency to every lookup that fell through to it.
+         *   2. It is the one Google endpoint left in the data path, and the
+         *      whole point of v6.9 is that nothing but Cloudflare is used.
+         *
+         * Both entries are now Cloudflare's two anycast resolvers, which is
+         * also what CfDns uses for DoH — so in-tunnel and out-of-tunnel DNS
+         * finally agree.
+         */
         private const val DNS_V4 = "1.1.1.1"
-        private const val DNS_V4_2 = "8.8.8.8"
+        private const val DNS_V4_2 = "1.0.0.1"
     }
 }
