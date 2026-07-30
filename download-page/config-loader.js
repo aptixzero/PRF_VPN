@@ -14,7 +14,12 @@
    ============================================================ */
 
 var DL_URL = "professor_vpn_config.json";
-var APP_CONFIG_URL = "https://raw.githubusercontent.com/prfgame/prf-VPN/main/adminpanel/app_config.json";
+
+/* v6.9 — this used to point at prfgame/prf-VPN, which returns 404, so the
+   website banner / logo / contact block silently never loaded. It now reads
+   the SAME live file the Android app reads, straight from the origin with no
+   CDN, mirror or CORS relay in between. */
+var APP_CONFIG_URL = "https://raw.githubusercontent.com/aptixzero/my_prFF_vP_N/main/adminpanel/app_config.json";
 
 document.getElementById("year").textContent = new Date().getFullYear();
 
