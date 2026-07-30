@@ -1067,7 +1067,7 @@ class NeonVpnService : VpnService() {
                 readTimeout = timeoutMs
                 requestMethod = "GET"
                 useCaches = false
-                setRequestProperty("User-Agent", "ProfessorVPN/6.6 (Android)")
+                setRequestProperty("User-Agent", "ProfessorVPN/6.9 (Android)")
                 setRequestProperty("Connection", "close")
             }
             try {

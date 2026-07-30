@@ -79,8 +79,16 @@ object PingService {
         // ever reaches this wave, so the survivors deserve more parallelism to
         // land their real pings fast. Still scaled off CPU cores so a 2 GB phone
         // stays at 6 while an 8-core device gets 12.
+        // v6.9 — 6–12 → 8–16. [Pinger] now runs its payload verdict CONDITIONALLY
+        // (only for nodes that look marginal) instead of on every single config, so
+        // the typical config costs ONE native core spin-up rather than three. That
+        // cuts peak native-heap pressure by roughly a third, which buys back enough
+        // headroom to widen the deep gate — and a wider deep gate is the single
+        // biggest remaining lever on sweep wall-clock now that the pre-gate has
+        // already discarded the dead majority. Still scaled off CPU cores so a 2 GB
+        // phone stays at 8 while an 8-core device gets 16.
         val cores = Runtime.getRuntime().availableProcessors().coerceAtLeast(1)
-        (cores + 4).coerceIn(6, 12)
+        (cores + 6).coerceIn(8, 16)
     }
 
     /**
@@ -156,8 +164,32 @@ object PingService {
     @Volatile private var lastSweepEndedAt = 0L
     @Volatile private var loadedBucket: String? = null
 
-    /** v6.2 — true while ANY sweep (pingAll) is in flight. */
-    val isSweepRunning: Boolean get() = sweepJob?.isActive == true
+    /**
+     * True while ANY sweep (pingAll) is in flight.
+     *
+     * v6.9 — ORs in the published flow value. `pingAll` marks the sweep running
+     * synchronously before it launches, so a caller that polls this the instant
+     * `pingAll` returns now gets `true` even in the tiny window before the
+     * coroutine is actually scheduled. That window is what made "Ping all" look
+     * like it skipped.
+     */
+    val isSweepRunning: Boolean
+        get() = sweepJob?.isActive == true || _sweep.value.running
+
+    /**
+     * v6.9 — true only while a MANUAL [pingAll] sweep is alive.
+     *
+     * [isSweepRunning] deliberately also covers the AutoTestEngine's externally
+     * published progress, because the UI must show a progress bar for BOTH. But
+     * "should the PING ALL button be refused?" is a different question: refusing it
+     * because a background Auto Test happens to be pinging is exactly the
+     * «Ping all میپره و هیچ کانفیگی رو پینگ نمیگیره» symptom — the user taps, the
+     * app silently declines, nothing appears to happen. Admission control uses this
+     * narrower predicate so a manual request is only ever refused by another
+     * MANUAL sweep.
+     */
+    val isManualSweepRunning: Boolean
+        get() = sweepJob?.isActive == true
 
     /**
      * Hydrate the in-memory flow from the persisted [bucket] store once. Safe to
@@ -213,6 +245,29 @@ object PingService {
     fun setExternalStatus(cfg: ServerConfig, status: PingStatus) = setStatus(keyOf(cfg), status)
 
     /**
+     * v6.9 — LET AN EXTERNAL DRIVER PUBLISH SWEEP PROGRESS.
+     *
+     * THE BUG THIS FIXES: «روند پینگ گرفتن رو نمیتونم ببینم» plus "My Configs has
+     * no ping progress bar". [sweep] was only ever written by [pingAll], so while
+     * the [AutoTestEngine] was pinging a 240-config batch — the situation the user
+     * spends most of their time in — every progress bar in the app sat at zero and
+     * looked idle. The engine now reports its own testing progress through this
+     * method, so the SAME bar the manual PING ALL drives also tracks the automatic
+     * run. One observable source of truth, exactly as designed.
+     *
+     * Refuses to clobber a real [pingAll] sweep: a manual sweep always wins,
+     * because that is the one the user is actively watching.
+     */
+    fun publishExternalSweep(running: Boolean, tested: Int, total: Int) {
+        if (sweepJob?.isActive == true) return
+        _sweep.value = SweepState(
+            running = running,
+            tested = tested.coerceAtLeast(0),
+            total = total.coerceAtLeast(0)
+        )
+    }
+
+    /**
      * v6.2 — Ping a SINGLE config immediately (the per-row PING button). Runs on
      * the app scope so a tab switch can't cancel it. Per the brief, pressing PING
      * on a single config is ALWAYS allowed — even mid-sweep — because it is one
@@ -254,31 +309,46 @@ object PingService {
      * @return true if a sweep was started, false if one is already running.
      */
     fun pingAll(ctx: Context, configs: List<ServerConfig>, bucket: String): Boolean {
-        // Only one sweep at a time. The UI disables PING ALL while running, so a
-        // spam-tap can never stack a second sweep on top of the first.
-        val running = sweepJob?.isActive == true
-        if (running) return false
+        // Only one MANUAL sweep at a time. The UI disables PING ALL while one runs,
+        // so a spam-tap can never stack a second sweep on top of the first.
+        //
+        // v6.9 — note this checks `isManualSweepRunning`, NOT `isSweepRunning`. A
+        // background Auto Test publishing its own progress must never cause an
+        // explicit user request to be silently declined; the user's request takes
+        // over the shared progress bar instead.
+        if (isManualSweepRunning) return false
         if (configs.isEmpty()) return false
 
         // Snapshot the ordered list of (key, cfg) so the sweep is stable even if
         // the UI mutates its list while we run (Auto Test churn, delete, etc.).
         val ordered = configs.map { keyOf(it) to it }
 
-        sweepJob = appScope.launch {
-            // CLEAR every previous ping for this bucket and show "Pinging…" for
-            // every config in the list — the user pressed PING ALL, so a fresh
-            // measurement is expected for each, not the stale old value.
-            val cleared = HashMap<String, PingStatus>(_statuses.value)
-            ordered.forEach { (k, _) -> cleared[k] = PingStatus.Testing }
-            _statuses.value = cleared
-            _sweep.value = SweepState(running = true, tested = 0, total = ordered.size)
+        // ── v6.9: PUBLISH THE SWEEP *BEFORE* LAUNCHING IT ────────────────────
+        //
+        // THE BUG THIS FIXES: «Ping all بعضی وقت ها میپره و هیچ کانفیگی رو پینگ
+        // نمیگیره» plus "My Configs has no ping progress bar".
+        //
+        // v6.8 flipped `running = true` INSIDE the coroutine. `pingAll` therefore
+        // returned while `isSweepRunning` was still false and `sweep.running` was
+        // still false, so a caller that immediately polled either of them concluded
+        // "no sweep is happening", re-enabled its buttons and hid its progress bar —
+        // the sweep ran invisibly and looked "skipped". Both the state flow AND the
+        // "Pinging…" row statuses are now published synchronously, on the calling
+        // thread, before this function returns. By the time any caller can observe
+        // anything, the sweep is already visibly running.
+        val cleared = HashMap<String, PingStatus>(_statuses.value)
+        ordered.forEach { (k, _) -> cleared[k] = PingStatus.Testing }
+        _statuses.value = cleared
+        _sweep.value = SweepState(running = true, tested = 0, total = ordered.size)
 
+        sweepJob = appScope.launch {
             val tested = java.util.concurrent.atomic.AtomicInteger(0)
             fun bump() {
                 val n = tested.incrementAndGet()
                 _sweep.value = SweepState(running = true, tested = n, total = ordered.size)
             }
 
+            try {
             withContext(Dispatchers.IO) {
                 // ── WAVE 1 (v6.6): the WIDE, CHEAP TCP PRE-GATE ──────────────
                 // A public feed is mostly corpses. Discovering that with a deep
@@ -368,9 +438,29 @@ object PingService {
                     }
                 }.awaitAll()
             }
-            persist(ctx, bucket)
-            lastSweepEndedAt = System.currentTimeMillis()
-            _sweep.value = SweepState(running = false, tested = ordered.size, total = ordered.size)
+            } finally {
+                // ── v6.9: ALWAYS SIGNAL COMPLETION ───────────────────────────
+                // The sweep must publish `running = false` on EVERY exit path,
+                // including cancellation and an unexpected throw. v6.8 only did it
+                // on the happy path, so a sweep that died mid-way left the UI's
+                // progress bar pinned and PING ALL disabled forever — the user then
+                // had no way to re-ping without restarting the app.
+                runCatching { persist(ctx, bucket) }
+                lastSweepEndedAt = System.currentTimeMillis()
+                _sweep.value = SweepState(
+                    running = false,
+                    tested = tested.get().coerceAtLeast(0),
+                    total = ordered.size
+                )
+                // Any row still spinning (cancelled before it was measured) must not
+                // be left showing "Pinging…" forever.
+                val snap = _statuses.value
+                if (snap.values.any { it === PingStatus.Testing }) {
+                    val cleaned = HashMap<String, PingStatus>(snap.size)
+                    snap.forEach { (k, v) -> if (v !== PingStatus.Testing) cleaned[k] = v }
+                    _statuses.value = cleaned
+                }
+            }
         }
         return true
     }

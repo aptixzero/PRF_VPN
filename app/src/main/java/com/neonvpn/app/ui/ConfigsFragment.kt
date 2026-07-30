@@ -124,15 +124,28 @@ class ConfigsFragment : Fragment() {
                 PingService.sweep.collect { s ->
                     if (!isAdded) return@collect
                     if (s.running) {
+                        // ── v6.9: THE PING PROGRESS BAR ──────────────────────
+                        // The brief: «در صفحه My Configs نوار پیشرفت پینگ وجود
+                        // نداره». It existed in the layout but only a MANUAL sweep
+                        // ever published into this flow, so during the automatic
+                        // run — when the user is actually waiting on pings — the
+                        // bar never appeared. AutoTestEngine now publishes here too
+                        // (PingService.publishExternalSweep), so this block renders
+                        // both kinds of run with a real, climbing count.
                         sweepBox.visibility = View.VISIBLE
                         sweepBar.max = s.total.coerceAtLeast(1)
                         sweepBar.progress = s.tested
-                        sweepLabel.text = "Pinging… ${s.tested}/${s.total}"
-                        btnPingAll.isEnabled = false
-                        btnPingAll.alpha = 0.4f
-                        btnSelectMode.isEnabled = false
-                        btnSelectMode.alpha = 0.4f
-                        adapter.pingButtonsEnabled = false
+                        val pct = if (s.total > 0) s.tested * 100 / s.total else 0
+                        sweepLabel.text = "Pinging… ${s.tested}/${s.total}  ·  $pct%"
+                        // Only a MANUAL sweep may lock the controls. A background
+                        // Auto Test must leave PING ALL usable, otherwise the user
+                        // can never re-ping while Auto Test is on.
+                        val manual = PingService.isManualSweepRunning
+                        btnPingAll.isEnabled = !manual
+                        btnPingAll.alpha = if (manual) 0.4f else 1f
+                        btnSelectMode.isEnabled = !manual
+                        btnSelectMode.alpha = if (manual) 0.4f else 1f
+                        adapter.pingButtonsEnabled = !manual
                         // The Cancel button is live for the whole sweep.
                         btnCancelPing?.isEnabled = true
                         btnCancelPing?.alpha = 1f
@@ -306,6 +319,28 @@ class ConfigsFragment : Fragment() {
         return (tokens - imported).coerceAtLeast(0)
     }
 
+    /**
+     * v6.9 — TAP A CONFIG = SWITCH TO IT, INSTANTLY.
+     *
+     * THE BUG THIS FIXES: «باید بتونم سریع بین کانفیگ ها جابجا بشم» — the user must
+     * be able to move between configs rapidly. v6.8 only wrote the new selection to
+     * the store: to actually change server the user had to go back to the home tab,
+     * tap Disconnect, wait for the teardown, and tap Connect again. Three gestures
+     * and a wait for something that should be one tap, which is why switching felt
+     * impossible rather than merely slow.
+     *
+     * [com.neonvpn.app.service.NeonVpnService] has been able to handle this since
+     * v6.5: a start intent delivered while a tunnel is up is treated as a CONFIG
+     * SWITCH, serialised on its single session thread and tagged with a generation
+     * counter, so the old session is torn down and the new one raised without the
+     * two ever interleaving. Superseded requests are dropped by generation, so
+     * hammering several configs in a row is safe — only the last one survives, and
+     * no half-open session is left behind. The capability was simply never wired to
+     * this tap.
+     *
+     * When nothing is connected we behave exactly as before (select only), so
+     * tapping a row never starts a tunnel the user did not ask for.
+     */
     private fun selectServer(cfg: ServerConfig) {
         if (adapter.selectMode) {
             adapter.toggleChecked(cfg.id)
@@ -315,7 +350,40 @@ class ConfigsFragment : Fragment() {
         store.setSelectedId(cfg.id)
         adapter.selectedId = cfg.id
         adapter.notifyDataSetChanged()
-        toast(getString(R.string.selected, cfg.remark))
+
+        val state = VpnStateBus.state
+        val live = state == com.neonvpn.app.service.NeonVpnService.STATE_CONNECTED ||
+            state == com.neonvpn.app.service.NeonVpnService.STATE_CONNECTING
+        if (!live) {
+            toast(getString(R.string.selected, cfg.remark))
+            return
+        }
+
+        // Already connected → hand the switch straight to the service.
+        runCatching {
+            val ctx = requireContext()
+            VpnStateBus.update(
+                com.neonvpn.app.service.NeonVpnService.STATE_CONNECTING, cfg.remark
+            )
+            val intent = android.content.Intent(ctx, com.neonvpn.app.service.NeonVpnService::class.java)
+            // Deliver defensively in both directions: startForegroundService is
+            // required on O+ when the service is down but throws if the process is
+            // considered background at that instant, while startService works when
+            // the service is already up (which is exactly the switch case). Trying
+            // one and falling back to the other means a switch tap is never lost.
+            val ok = runCatching {
+                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                    ctx.startForegroundService(intent)
+                } else {
+                    ctx.startService(intent)
+                }
+                true
+            }.getOrDefault(false)
+            if (!ok) runCatching { ctx.startService(intent) }
+            toast(getString(R.string.switching_to, cfg.remark))
+        }.onFailure {
+            toast(getString(R.string.selected, cfg.remark))
+        }
     }
 
     private fun deleteServer(cfg: ServerConfig) {
@@ -386,8 +454,18 @@ class ConfigsFragment : Fragment() {
 
     private fun pingAll() {
         if (adapter.items.isEmpty()) return
-        if (PingService.isSweepRunning) return   // buttons are disabled, but guard
+        // v6.9 — guard on the MANUAL sweep only. v6.8 used `isSweepRunning`, which
+        // is also true while the background Auto Test is pinging, so tapping PING
+        // ALL during an Auto Test returned here silently and the user saw nothing
+        // happen at all — the reported «Ping all یهو میپره و هیچی پینگ نمیگیره».
+        if (PingService.isManualSweepRunning) return
         val started = PingService.pingAll(requireContext(), adapter.items.toList(), PingStore.MY)
+        if (!started) {
+            // Should be unreachable (we just checked), but never leave the tap
+            // unexplained — a silent no-op is what made this feel broken.
+            toast(getString(R.string.testing_ping))
+            return
+        }
         if (started) {
             toast(getString(R.string.testing_ping))
             // v5.9 — pin the healthy configs to the top the INSTANT each ping
@@ -400,7 +478,10 @@ class ConfigsFragment : Fragment() {
                 // Wait until the app-scoped sweep reports it is DONE. The sweep
                 // state is the single source of truth (it flips running=false the
                 // instant all probes resolve), so this loop is exact, not a guess.
-                while (isResumedSafe() && PingService.isSweepRunning) {
+                // v6.9 — `pingAll` publishes running = true synchronously before it
+                // returns, so this loop can no longer exit on its very first check
+                // (the v6.8 race that made a sweep look like it never happened).
+                while (isResumedSafe() && PingService.isManualSweepRunning) {
                     kotlinx.coroutines.delay(250)
                 }
                 pingAllInFlight = false

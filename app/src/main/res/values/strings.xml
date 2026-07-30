@@ -29,6 +29,8 @@
     <string name="no_valid_config">No valid config found in clipboard</string>
     <string name="added_n_configs">Added %1$d new config(s) of %2$d</string>
     <string name="selected">Selected: %1$s</string>
+    <!-- v6.9 — shown when tapping a config while connected switches to it live. -->
+    <string name="switching_to">Switching to %1$s…</string>
 
     <!-- stats -->
     <string name="download">DOWNLOAD</string>
@@ -178,6 +180,18 @@
     <!-- ===== v5.7 — Auto Test probe result messages ===== -->
     <string name="probe_error">Connection error — please try again</string>
     <string name="probe_saved">%1$d config(s) added to Free Configs — testing…</string>
+
+    <!-- ===== v6.9 — Auto Test live phase labels =====
+         The user must always be able to SEE what the test is doing, so the
+         probe page names its current phase instead of showing a bare bar. -->
+    <string name="autotest_phase_sources">Finding the first reachable VLESS + VMESS source…</string>
+    <string name="autotest_phase_collect">Collecting 120 VLESS + 120 VMESS…</string>
+    <string name="autotest_phase_ping">Adding to Free Configs and taking pings…</string>
+    <string name="autotest_phase_retry">Weak connection — retrying…</string>
+
+    <!-- ===== v6.9 — visible ping progress ===== -->
+    <string name="ping_progress">Pinging %1$d / %2$d</string>
+    <string name="ping_progress_done">Pinged %1$d / %2$d</string>
 
     <!-- ===== v6.3 — in-app announcement ===== -->
     <!-- NOTE: this must NEVER mention an admin panel. It is branded as an

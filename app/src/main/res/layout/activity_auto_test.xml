@@ -59,6 +59,22 @@
             android:textStyle="bold"
             android:layout_marginTop="14dp" />
 
+        <!-- v6.9 — LIVE PHASE LABEL. The brief: «روند پینگ گرفتن رو نمیتونم
+             ببینم» (I cannot see the pinging process). The bar alone told the
+             user nothing about WHAT was happening, so a slow phase looked like
+             a freeze. This line now names the current phase in real time:
+             finding sources → collecting 240 → handing them to the ping sweep. -->
+        <TextView
+            android:id="@+id/probe_status"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/autotest_phase_sources"
+            android:textColor="?attr/appTextSecondary"
+            android:textSize="12sp"
+            android:gravity="center"
+            android:maxLines="2"
+            android:layout_marginTop="8dp" />
+
         <TextView
             android:id="@+id/btn_probe_cancel"
             android:layout_width="wrap_content"

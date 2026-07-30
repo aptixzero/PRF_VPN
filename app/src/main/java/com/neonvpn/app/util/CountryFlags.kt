@@ -351,7 +351,7 @@ object CountryFlags {
             readTimeout = 3000
             requestMethod = "GET"
             instanceFollowRedirects = true
-            setRequestProperty("User-Agent", "ProfessorVPN/6.3 (Android)")
+            setRequestProperty("User-Agent", "ProfessorVPN/6.9 (Android)")
             setRequestProperty("Accept", "*/*")
         }
         return try {

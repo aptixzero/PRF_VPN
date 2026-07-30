@@ -143,7 +143,9 @@ anywhere** — the anti-censorship mechanism is now Cloudflare DNS-over-HTTPS.
   starting at 120 ms, the 30-second wait is gone.
 - **Zero proxies.** `r.jina.ai`, `api.allorigins.win`, `ghproxy.net`,
   `cors.isomorphic-git.org`, `gh.api.99988866.xyz`, `cdn.statically.io` and
-  `gitcdn.link` are all deleted. They were third-party servers in the middle of
+  `gitcdn.link` are all deleted. (v6.9 finished the job by deleting the last
+  CDN mirror, `cdn.jsdelivr.net`, and the third-party paste host too — see the
+  v6.9 notes.) They were third-party servers in the middle of
   the config supply chain, rate-limited, mostly blocked from Iran anyway, and each
   dead one burned a ~9 s timeout before the next was tried. The **mechanism** was
   replaced rather than the mirror: since the dominant block in Iran is **DNS

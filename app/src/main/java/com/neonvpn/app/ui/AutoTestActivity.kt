@@ -11,6 +11,7 @@ import com.neonvpn.app.config.AutoTestEngine
 import com.neonvpn.app.config.ConfigParser
 import com.neonvpn.app.config.ConfigStore
 import com.neonvpn.app.config.ConnectivityProbe
+import com.neonvpn.app.config.FreeConfigSource
 import com.neonvpn.app.config.FreeConfigStore
 import com.neonvpn.app.config.PingService
 import com.neonvpn.app.config.PingStore
@@ -20,57 +21,67 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 
 /**
- * v6.1 — AUTO TEST connectivity page (two-phase, no fake error).
+ * v6.9 — AUTO TEST connectivity page.
  *
- * A deliberately minimal screen: a title + a progress bar. On open it runs the
- * two-phase [ConnectivityProbe]:
+ * ─────────────────────────────────────────────────────────────────────────────
+ * THE THREE BUGS THIS PAGE HAD, AND HOW v6.9 FIXES THEM
+ * ─────────────────────────────────────────────────────────────────────────────
  *
- *   0 % → 60 %  : a REAL connection test against the live source feeds — it opens
- *                 each source and finds which one the user can actually reach, and
- *                 bonds to it. The bar advances as each source is genuinely probed
- *                 (no random timer, no `delay()`). v6.1: the bar does NOT lock on
- *                 a single number — the probe keeps re-trying so long as the link
- *                 recovers, and only pauses (holds) while the internet is fully
- *                 down, resuming the instant it is reachable again.
- *   60 % → 100 %: it pulls a FULL fresh 240 batch of configs FROM THAT reached
- *                 source, in the background (the user does not see the Free tab).
- *                 The bar climbs as configs are actually collected.
+ * 1. «روی 30 درصد میمونه و بالای 5 دقیقه طول میکشه» — it parked at 30 % for
+ *    minutes. That was [ConnectivityProbe]'s doing (it ranked sources by ping in
+ *    two sequential halves); the probe is now a parallel RACE that finishes in
+ *    seconds. This page additionally refuses to sit silently: it names its
+ *    current phase on screen, so progress is always legible.
  *
- * v6.1 — THE BIG FIX: the collected 240 configs are added to **FREE CONFIGS**
- * (not My Configs). My Configs is the user's PERMANENT, hand-curated bucket — it
- * must ONLY ever contain configs the user pasted/added manually, plus the ones
- * that actually ping (the working ones), which the continuous [AutoTestEngine]
- * copies in automatically after they pass the ping test. Dumping all 240 raw
- * configs into My Configs (the pre-6.1 bug) was wrong.
+ * 2. «کانفیگ ها به لیست free اضافه نمیشوند» — nothing reached the Free list.
+ *    v6.8 only wrote to the store when the probe returned a non-empty list, so
+ *    ANY hiccup in the collect phase meant the user got an empty tab and no
+ *    explanation. v6.9 adds a RESCUE pass: if the probe reached a source but came
+ *    back empty, we go straight to [FreeConfigSource.nextBatch] ourselves before
+ *    giving up. And a failed press never wipes the existing list any more.
  *
- * So at 100 %: the 240 fresh configs are placed in the Free list, the page
- * closes, and the continuous [AutoTestEngine] is (re)started. The engine then
- * pings the whole Free batch and, for EACH config that returns a real ping,
- * copies it — live, one by one — into My Configs. When the 240 are exhausted it
- * REPLACES the Free list with a brand-new 240 batch and repeats. My Configs is
- * never wiped by this flow.
+ * 3. «روند پینگ گرفتن رو نمیتونم ببینم» — the pinging was invisible. This page
+ *    now STARTS the ping sweep itself, synchronously, before it closes
+ *    ([PingService.pingAll] publishes its running state on the calling thread as
+ *    of v6.9), so the Free tab already shows a live, climbing ping progress bar
+ *    the instant this page disappears.
  *
- * There is NO false "connection error" — the reported bug. Even when the network
- * is momentarily unreachable we simply close quietly and let the background engine
- * keep trying; we never flash "Connection error".
+ * ── THE FLOW ────────────────────────────────────────────────────────────────
+ *   0 % →  60 %  a REAL connection test: every candidate feed of both kinds is
+ *                opened AT ONCE and the FIRST reachable VLESS source and FIRST
+ *                reachable VMESS source win and are bonded. Per the brief we do
+ *                NOT hunt for the best ping here.
+ *   60 % → 100 % 120 VLESS + 120 VMESS are collected from those sources, written
+ *                to FREE CONFIGS, and their ping sweep is started.
  *
- * Every step is guarded so the page can never crash the app.
+ * My Configs is NEVER touched here. It is the user's permanent bucket (manual
+ * pastes + the configs that actually ping, which [AutoTestEngine] copies in one
+ * by one after they pass). Dumping raw configs there was the pre-6.1 bug.
+ *
+ * There is NO false "connection error". Every step is guarded so this page can
+ * never crash the app.
  */
 class AutoTestActivity : BaseActivity() {
 
     private lateinit var bar: ProgressBar
     private lateinit var percent: TextView
+    private lateinit var status: TextView
     private var probeJob: Job? = null
     private var barAnimator: ObjectAnimator? = null
     @Volatile private var finished = false
+
+    /** Ceiling for the rescue collect pass, so a rescue can't hang the page. */
+    private val rescueBudgetMs = 25_000L
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_auto_test)
         bar = findViewById(R.id.probe_bar)
         percent = findViewById(R.id.probe_percent)
+        status = findViewById(R.id.probe_status)
         bar.max = 100
 
         findViewById<TextView>(R.id.btn_probe_cancel).setOnClickListener {
@@ -80,11 +91,20 @@ class AutoTestActivity : BaseActivity() {
         startProbe()
     }
 
+    /**
+     * Publish the current phase so the user can always see WHAT is happening.
+     * A bare bar makes a slow phase indistinguishable from a freeze — which is
+     * exactly how the "stuck at 30 %" report started.
+     */
+    private fun setPhase(resId: Int) {
+        runOnUiThread { if (!isFinishing) runCatching { status.setText(resId) } }
+    }
+
     private fun startProbe() {
         probeJob = lifecycleScope.launch {
             // Shared dedup memory (persistent seen-set + everything already in My
-            // Configs) so the probe never hands back a config the user already
-            // has. The probe mutates this and we persist it once the batch lands.
+            // Configs) so the probe never hands back a config the user already has.
+            // The probe mutates this and we persist it once the batch lands.
             val seenKeys = withContext(Dispatchers.IO) {
                 val s = HashSet<String>()
                 runCatching { s.addAll(SeenConfigStore.load(applicationContext)) }
@@ -95,12 +115,22 @@ class AutoTestActivity : BaseActivity() {
                 s
             }
 
+            setPhase(R.string.autotest_phase_sources)
+
             val result = try {
                 ConnectivityProbe.probe(applicationContext, seenKeys) { p ->
                     runOnUiThread {
                         if (!isFinishing) {
                             animateBarTo(p)
                             percent.text = "$p%"
+                            // Name the phase from the bar's own position, so the two
+                            // can never disagree with each other.
+                            runCatching {
+                                status.setText(
+                                    if (p < 55) R.string.autotest_phase_sources
+                                    else R.string.autotest_phase_collect
+                                )
+                            }
                         }
                     }
                 }
@@ -108,24 +138,68 @@ class AutoTestActivity : BaseActivity() {
                 ConnectivityProbe.Result(emptyList(), reachedSource = false)
             }
 
-            // v6.1 — the bar has reached 100 % (real source work done). Place the
-            // collected 240 configs into FREE CONFIGS right now (NOT My Configs) so
-            // they are present the moment the page closes. We NEVER show a
-            // "connection error": whether we collected configs or not, we start the
-            // background engine (so configs keep arriving as the unstable link
-            // recovers) and close quietly.
-            val addedCount = if (result.configs.isNotEmpty()) {
-                runCatching { saveResult(result.configs, seenKeys) }.getOrDefault(0)
+            // ── RESCUE PASS (v6.9) ───────────────────────────────────────────
+            // The single most-complained-about symptom was an Auto Test that
+            // finished and left the Free tab empty. If the probe proved the user
+            // CAN reach a source but its collect phase came back with nothing, the
+            // right answer is to collect ourselves rather than shrug — the network
+            // is demonstrably up, so a batch is obtainable.
+            var configs = result.configs
+            if (configs.isEmpty() && result.reachedSource) {
+                setPhase(R.string.autotest_phase_retry)
+                configs = withContext(Dispatchers.IO) {
+                    runCatching {
+                        withTimeoutOrNull(rescueBudgetMs) {
+                            FreeConfigSource.nextBatch(
+                                applicationContext, 0, seenKeys
+                            ) { added, target, _ ->
+                                val pct = 60 + if (target > 0) (added * 36 / target) else 0
+                                runOnUiThread {
+                                    if (!isFinishing) {
+                                        animateBarTo(pct)
+                                        percent.text = "$pct%"
+                                    }
+                                }
+                            }.configs
+                        }
+                    }.getOrNull() ?: emptyList()
+                }
+            }
+
+            // Place the collected batch into FREE CONFIGS (never My Configs) so it
+            // is present the moment this page closes. We NEVER show a "connection
+            // error": whether or not we collected anything we start the background
+            // engine (so configs keep arriving as an unstable link recovers) and
+            // close quietly.
+            val addedCount = if (configs.isNotEmpty()) {
+                setPhase(R.string.autotest_phase_ping)
+                runCatching { saveResult(configs, seenKeys) }.getOrDefault(0)
             } else 0
 
-            // Always (RE)start the continuous engine — it pings the fresh Free
-            // batch and copies ONLY the configs that actually ping into My Configs,
-            // 240-at-a-time from the SAME bonded source. Using restart() (not
-            // start()) means opening this page again — even while a previous run is
-            // still going — never wedges the engine or leaves two loops fighting; it
-            // always begins a fresh, clean search+ping+move cycle. The engine also
-            // owns the Free-list ping sweep, so we do NOT ping here (pinging both
-            // here and in the engine would double-drive the same list).
+            animateBarTo(100)
+            runOnUiThread { if (!isFinishing) percent.text = "100%" }
+
+            // ── START THE PING SWEEP HERE, VISIBLY ───────────────────────────
+            // «روند پینگ گرفتن رو نمیتونم ببینم». As of v6.9 `pingAll` publishes
+            // `running = true` synchronously on the calling thread, so starting it
+            // here means the Free tab is ALREADY showing a live ping progress bar
+            // by the time this page finishes. The engine below picks the sweep up
+            // rather than starting a competing one (only one sweep can exist).
+            if (addedCount > 0) {
+                runCatching {
+                    val fresh: List<ServerConfig> = withContext(Dispatchers.IO) {
+                        FreeConfigStore(applicationContext).get()
+                    }
+                    if (fresh.isNotEmpty()) {
+                        PingService.pingAll(applicationContext, fresh, PingStore.FREE)
+                    }
+                }
+            }
+
+            // Always (RE)start the continuous engine — it pings the fresh Free batch
+            // and copies ONLY the configs that actually ping into My Configs, 240 at
+            // a time. restart() (not start()) means re-opening this page can never
+            // wedge the engine or leave two loops fighting.
             runCatching { AutoTestEngine.restart(applicationContext) }
 
             if (addedCount > 0) {
@@ -142,18 +216,17 @@ class AutoTestActivity : BaseActivity() {
     }
 
     /**
-     * v6.1 — place the freshly-probed batch into FREE CONFIGS (NOT My Configs).
+     * Place the freshly-probed batch into FREE CONFIGS (NOT My Configs).
      *
      * A fresh Auto Test REPLACES the previous FREE list with the new 240 batch —
-     * this is the "free configs like the older versions" behaviour: the Free tab
-     * shows exactly the batch currently under test. Configs are numbered
-     * sequentially "Server N" (baked into the link's #remark so the number
-     * survives being copied into another client).
+     * the Free tab shows exactly the batch currently under test. Configs are
+     * numbered sequentially "Server N", baked into the link's #remark so the number
+     * survives being copied into another client.
      *
-     * CRITICAL: My Configs is NOT touched here. It is the user's permanent bucket
-     * (manual pastes + configs that actually ping). Only the continuous
-     * [AutoTestEngine] adds to My Configs, and only for configs that pass the ping
-     * test. So a fresh Auto Test never wipes or bloats My Configs.
+     * v6.9 — the old ping results for this bucket are dropped with
+     * [PingStore.clear] rather than [PingService.clear]. `PingService.clear` also
+     * calls `cancel()`, which killed the sweep we are about to start and reset the
+     * shared status map for BOTH tabs — one of the reasons pings appeared to vanish.
      *
      * @return how many configs were actually placed in the Free list.
      */
@@ -178,13 +251,16 @@ class AutoTestActivity : BaseActivity() {
             )
         }
 
-        // REPLACE the previous Free batch with this brand-new one (old batch wiped,
-        // new 240 take their place) — exactly like the older versions' Free tab.
+        // REPLACE the previous Free batch with this brand-new one.
         runCatching { freeStore.replaceAll(named) }
 
-        // Clear any stale ping results for rows that no longer exist so the Free
-        // bucket's badges reflect only the current batch.
-        runCatching { PingService.clear(applicationContext, PingStore.FREE) }
+        // Drop the PERSISTED badges of the batch that just went away, without
+        // touching the live in-memory map or cancelling anything.
+        runCatching { PingStore(applicationContext, PingStore.FREE).clear() }
+
+        // Ping history is per-config; a brand-new batch has no history worth
+        // smoothing against, so start its numbers clean.
+        runCatching { com.neonvpn.app.config.Pinger.resetHistory() }
 
         // Persist the dedup memory so the NEXT batch prefers fresh configs.
         runCatching { SeenConfigStore.save(applicationContext, seenKeys) }

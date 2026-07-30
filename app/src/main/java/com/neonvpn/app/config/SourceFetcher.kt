@@ -5,16 +5,47 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
 /**
- * Resilient single-source fetcher for the [LiveSources] feeds.
+ * v6.9 — DIRECT-ONLY source fetcher. **ZERO INTERMEDIARIES.**
  *
- * v6.6 — **PROXY-FREE.** Iranian ISPs mostly block
- * `raw.githubusercontent.com` by **DNS poisoning**, not by blocking the address,
- * so the fix is to learn the true address over an encrypted channel rather than
- * to hand the request to somebody else's server. Fetches go through
- * [com.neonvpn.app.net.DirectHttp], which resolves via Cloudflare DoH
- * ([com.neonvpn.app.net.CfDns]) and connects straight to the origin with full
- * certificate validation. The old chain of public reverse proxies
- * (`r.jina.ai`, `allorigins`, `ghproxy`, …) is gone — see [mirrorCandidates].
+ * ─────────────────────────────────────────────────────────────────────────────
+ * WHAT v6.9 REMOVED, AND WHY
+ * ─────────────────────────────────────────────────────────────────────────────
+ * The v6.9 brief is explicit: «لطفا از سایت واسط یا پروکسی استفاده نکن … و کلا
+ * این آدرس رو حذف کن … درون برنامه نباید از پروکسی استفاده کنی، نباید از واسط
+ * استفاده کنی».
+ *
+ * So this file now contains exactly ONE candidate per source: **the origin URL
+ * itself**. Nothing else. There is no proxy, no CORS bridge, no text-extraction
+ * relay, and — new in v6.9 — no third-party CDN mirror either. v6.8 still kept
+ * `cdn.jsdelivr.net` as a "not really a proxy" fallback; it is still somebody
+ * else's server sitting between the user and the config list, and it still cost
+ * a full extra timeout on every dead source. Both reasons are enough to delete
+ * it, so it is gone.
+ *
+ * The only thing standing between the app and the origin is
+ * [com.neonvpn.app.net.DirectHttp], which is not an intermediary at all: it
+ * resolves the hostname over encrypted **Cloudflare DoH** ([com.neonvpn.app.net.CfDns])
+ * — the one outside service the brief explicitly permits — and then dials the
+ * REAL origin address itself, with correct SNI and full certificate validation.
+ * That defeats the actual blocking mechanism on Iranian ISPs (DNS poisoning)
+ * without handing anybody the config stream.
+ *
+ * ─────────────────────────────────────────────────────────────────────────────
+ * WHY v6.9 IS DRAMATICALLY FASTER HERE
+ * ─────────────────────────────────────────────────────────────────────────────
+ *  1. **One candidate, not two.** A dead source now costs ONE timeout, not two.
+ *  2. **A short-lived body cache** ([cache]). The Auto-Test probe, the batch
+ *     builder and the engine all read the same handful of feeds within seconds
+ *     of each other. v6.8 re-downloaded each of them every single time. v6.9
+ *     serves the second and third read from memory instantly, which removes
+ *     most of the wall-clock from the "collect 240 configs" phase.
+ *  3. **A negative cache** ([failed]). A feed that just failed is not retried
+ *     for [FAIL_TTL_MS]; there is no point paying its timeout again 3 seconds
+ *     later, and that repeated payment is precisely what made the connection
+ *     test crawl.
+ *  4. **Parsed-link memoisation** ([linkCache]). `extractLinks` used to re-parse
+ *     a multi-megabyte feed body for every caller. Now the extracted link list
+ *     is cached per (body, kind).
  *
  * Every call is exception-safe and returns `null` on total failure — one dead
  * source can never crash the batch builder or the Auto-Test probe.
@@ -23,102 +54,119 @@ object SourceFetcher {
 
     private const val TAG = "SourceFetcher"
 
-    /** Fetch a source URL (with mirror fallback). Returns the body or null. */
-    suspend fun fetch(url: String): String? = withContext(Dispatchers.IO) {
-        for (candidate in mirrorCandidates(url)) {
-            val body = try { fetchOne(candidate) } catch (e: Throwable) {
-                Log.w(TAG, "fetch failed for $candidate: ${e.message}"); null
+    /** How long a successfully-fetched body may be reused from memory. */
+    private const val BODY_TTL_MS = 90_000L
+
+    /** How long a failed source is skipped before we try it again. */
+    private const val FAIL_TTL_MS = 30_000L
+
+    private class Cached(val body: String, val at: Long)
+
+    private val cache = java.util.concurrent.ConcurrentHashMap<String, Cached>()
+    private val failed = java.util.concurrent.ConcurrentHashMap<String, Long>()
+
+    /**
+     * Parsed-link memo. Key is `kind + '|' + body.length + '|' + body.hashCode()`
+     * so it is cheap to compute and effectively collision-free for our use.
+     */
+    private val linkCache = java.util.concurrent.ConcurrentHashMap<String, List<String>>()
+
+    /** Bound the memo so a long Auto-Test session cannot grow it forever. */
+    private const val MAX_LINK_CACHE = 96
+
+    /**
+     * Fetch a source URL. Returns the body or null.
+     *
+     * v6.9 — served from the in-memory cache when we already downloaded it in the
+     * last [BODY_TTL_MS], and skipped outright when it failed in the last
+     * [FAIL_TTL_MS]. Both are pure speed: the verdicts are identical.
+     */
+    suspend fun fetch(url: String, allowCache: Boolean = true): String? = withContext(Dispatchers.IO) {
+        val now = System.currentTimeMillis()
+
+        if (allowCache) {
+            cache[url]?.let { c ->
+                if (now - c.at < BODY_TTL_MS && c.body.isNotBlank()) return@withContext c.body
             }
-            if (!body.isNullOrBlank()) return@withContext body
+            failed[url]?.let { at ->
+                if (now - at < FAIL_TTL_MS) return@withContext null
+            }
         }
-        null
+
+        // ONE candidate: the origin. No mirrors, no proxies, no relays.
+        val body = try {
+            com.neonvpn.app.net.DirectHttp.get(url)
+        } catch (e: Throwable) {
+            Log.w(TAG, "fetch failed for $url: ${e.message}")
+            null
+        }
+
+        if (body.isNullOrBlank()) {
+            failed[url] = now
+            return@withContext null
+        }
+        failed.remove(url)
+        cache[url] = Cached(body, now)
+        body
     }
 
     /**
      * Parse a fetched source body into ONLY the vless/vmess raw links that match
      * the requested [kind]. Blank / comment lines and unsupported schemes are
      * dropped. The ORIGINAL link is kept verbatim (payload never rewritten).
+     *
+     * v6.9 — memoised. The same feed body is handed to this function by the
+     * connection test, the batch builder and the engine within a few seconds;
+     * re-parsing a multi-megabyte body three times was pure waste.
      */
     fun extractLinks(body: String, kind: LiveSources.Kind, limit: Int = Int.MAX_VALUE): List<String> {
+        val memoKey = "${kind.name}|${body.length}|${body.hashCode()}"
+        linkCache[memoKey]?.let { cached ->
+            return if (cached.size <= limit) cached else cached.subList(0, limit)
+        }
+        val out = extractLinksUncached(body, kind)
+        if (linkCache.size > MAX_LINK_CACHE) linkCache.clear()
+        linkCache[memoKey] = out
+        return if (out.size <= limit) out else out.subList(0, limit)
+    }
+
+    private fun extractLinksUncached(body: String, kind: LiveSources.Kind): List<String> {
         val want = if (kind == LiveSources.Kind.VLESS) "vless" else "vmess"
-        val out = ArrayList<String>(256)
-        // Some feeds publish a base64 subscription blob rather than one link per
-        // line. parseMany handles both, so we run it first and fall back to a
-        // line scan when it yields nothing.
-        val parsed = try { ConfigParser.parseMany(body) } catch (_: Throwable) { emptyList() }
-        if (parsed.isNotEmpty()) {
-            for (cfg in parsed) {
-                if (out.size >= limit) break
+        val out = ArrayList<String>(512)
+        // v6.9 — FAST PATH FIRST. The overwhelming majority of these feeds are
+        // plain "one link per line" text, and a line scan is far cheaper than the
+        // full base64/subscription decoder. So we scan lines first and only fall
+        // back to parseMany (which handles base64-wrapped subscription blobs) when
+        // the line scan found nothing. v6.8 did it the other way round and paid the
+        // heavy decoder on every single feed.
+        val marker = "$want://"
+        if (body.contains(marker)) {
+            for (rawLine in body.lineSequence()) {
+                val line = rawLine.trim()
+                if (line.isEmpty() || line.startsWith("#") || line.startsWith("//")) continue
+                if (!line.startsWith(marker, ignoreCase = true)) continue
+                val cfg = try { ConfigParser.parseSingleSafe(line) } catch (_: Throwable) { null } ?: continue
                 if (cfg.protocol != want) continue
                 if (cfg.address.isBlank() || cfg.port !in 1..65535 || cfg.userId.isBlank()) continue
-                if (cfg.rawLink.isNotBlank()) out.add(cfg.rawLink)
+                out.add(line)
             }
             if (out.isNotEmpty()) return out
         }
-        for (rawLine in body.lineSequence()) {
-            if (out.size >= limit) break
-            val line = rawLine.trim()
-            if (line.isEmpty() || line.startsWith("#") || line.startsWith("//")) continue
-            val cfg = try { ConfigParser.parseSingleSafe(line) } catch (_: Throwable) { null } ?: continue
+
+        // Slow path: base64 subscription blob / mixed content.
+        val parsed = try { ConfigParser.parseMany(body) } catch (_: Throwable) { emptyList() }
+        for (cfg in parsed) {
             if (cfg.protocol != want) continue
             if (cfg.address.isBlank() || cfg.port !in 1..65535 || cfg.userId.isBlank()) continue
-            out.add(line)
+            if (cfg.rawLink.isNotBlank()) out.add(cfg.rawLink)
         }
         return out
     }
 
-    /**
-     * v6.6 — **NO PROXIES.** The candidate list is now the origin plus GitHub's
-     * own read-only CDN, and nothing else.
-     *
-     * WHAT WAS REMOVED AND WHY: v6.5 appended `ghproxy.net`,
-     * `gh.api.99988866.xyz`, `cors.isomorphic-git.org`, `r.jina.ai` and
-     * `api.allorigins.win`. Those are third-party reverse proxies that read (and
-     * could rewrite) every config before it reached the user, they are heavily
-     * rate-limited, and they are themselves blocked or throttled from Iran — so
-     * the "fallback" usually failed *after* burning a full timeout each. Five dead
-     * candidates at ~9 s apiece is most of a minute per source, which is exactly
-     * the reported slowness.
-     *
-     * WHAT REPLACES THEM: the real blocker on Iranian ISPs is DNS poisoning of
-     * `raw.githubusercontent.com`, and [com.neonvpn.app.net.CfDns] defeats that
-     * directly by resolving over encrypted Cloudflare DoH and dialling the true
-     * origin with full certificate validation. So the ORIGIN itself now succeeds
-     * in the case that used to need a proxy.
-     *
-     * `cdn.jsdelivr.net` is kept as the single fallback. It is not a proxy: it is
-     * GitHub's widely-used immutable CDN, serving the same repository file over
-     * its own anycast edge, and it stays reachable when the GitHub apex is
-     * throttled. One fallback that works beats five that don't.
-     */
-    private fun mirrorCandidates(urlStr: String): List<String> {
-        val out = LinkedHashSet<String>()
-        out.add(urlStr)
-        val rawPrefix = "https://raw.githubusercontent.com/"
-        if (urlStr.startsWith(rawPrefix)) {
-            val rest = urlStr.substring(rawPrefix.length)
-            // strip a possible /refs/heads/ segment for jsDelivr (@branch form)
-            val parts = rest.split('/')
-            if (parts.size >= 4) {
-                val user = parts[0]; val repo = parts[1]
-                var branchIdx = 2
-                var branch = parts[2]
-                if (parts.size >= 5 && parts[2] == "refs" && parts[3] == "heads") {
-                    branch = parts[4]; branchIdx = 4
-                }
-                val path = parts.drop(branchIdx + 1).joinToString("/")
-                out.add("https://cdn.jsdelivr.net/gh/$user/$repo@$branch/$path")
-            }
-        }
-        return out.toList()
+    /** Drop every cached body / failure note (used on a material network change). */
+    fun invalidate() {
+        cache.clear()
+        failed.clear()
+        linkCache.clear()
     }
-
-    /**
-     * v6.6 — fetched through the shared [com.neonvpn.app.net.DirectHttp] client:
-     * Cloudflare-DoH resolution (beats DNS poisoning), a real connection pool and
-     * TLS session reuse (so the 2nd..Nth source fetch skips the handshake), and
-     * absolutely no proxy in the path.
-     */
-    private fun fetchOne(urlStr: String): String? =
-        com.neonvpn.app.net.DirectHttp.get(urlStr)
 }

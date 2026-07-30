@@ -8,22 +8,24 @@ import java.net.UnknownHostException
 import java.util.concurrent.ConcurrentHashMap
 
 /**
- * v6.6 — CLOUDFLARE DNS-over-HTTPS RESOLVER. **NO PROXIES, ANYWHERE.**
+ * v6.9 — CLOUDFLARE DNS-over-HTTPS RESOLVER. **NO PROXIES, ANYWHERE.**
  *
  * ─────────────────────────────────────────────────────────────────────────────
- * WHY THIS REPLACES THE OLD PROXY MIRROR CHAINS
+ * WHY THIS EXISTS INSTEAD OF A MIRROR / RELAY CHAIN
  * ─────────────────────────────────────────────────────────────────────────────
- * Up to v6.5 every feed / panel fetch that failed was retried through a chain of
- * public reverse proxies — `r.jina.ai`, `api.allorigins.win`, `ghproxy.net`,
- * `cors.isomorphic-git.org`, `gh.api.99988866.xyz`. The explicit instruction for
- * v6.6 is that those must go, and they deserve to:
+ * Routing config downloads through somebody else's server is forbidden in this
+ * project, and for good reasons:
  *
- *   • they are third-party servers that see and can rewrite every byte of the
- *     configs the user is about to route their traffic through;
- *   • they are rate-limited, frequently down, and slow — a dead proxy still had
- *     to time out before the next was tried, so a fetch could take 30-60 s;
- *   • most are themselves blocked or throttled from Iran, so the fallback that
+ *   • such a server sees and can rewrite every byte of the configs the user is
+ *     about to route their traffic through;
+ *   • they are rate-limited, frequently down, and slow — each dead one had to
+ *     time out before the next was tried, so a single fetch could take 30-60 s;
+ *   • most are themselves blocked or throttled from Iran, so the "fallback" that
  *     was supposed to rescue a blocked fetch usually failed as well.
+ *
+ * Cloudflare DoH is the ONE outside service the brief allows, and it is not an
+ * intermediary for content: it only answers "what is this hostname's address?".
+ * The config bytes themselves always come straight from the origin.
  *
  * ─────────────────────────────────────────────────────────────────────────────
  * WHAT WE DO INSTEAD — ATTACK THE ACTUAL BLOCKING MECHANISM
@@ -121,7 +123,7 @@ object CfDns : Dns {
                     requestMethod = "GET"
                     instanceFollowRedirects = true
                     setRequestProperty("Accept", "application/dns-json")
-                    setRequestProperty("User-Agent", "ProfessorVPN/6.6 (Android)")
+                    setRequestProperty("User-Agent", "ProfessorVPN/6.9 (Android)")
                 }
                 var body: String? = null
                 try {
