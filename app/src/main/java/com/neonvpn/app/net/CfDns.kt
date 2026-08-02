@@ -123,7 +123,7 @@ object CfDns : Dns {
                     requestMethod = "GET"
                     instanceFollowRedirects = true
                     setRequestProperty("Accept", "application/dns-json")
-                    setRequestProperty("User-Agent", "ProfessorVPN/6.9 (Android)")
+                    setRequestProperty("User-Agent", "ProfessorVPN/7 (Android)")
                 }
                 var body: String? = null
                 try {

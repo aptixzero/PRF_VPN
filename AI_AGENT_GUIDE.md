@@ -45,8 +45,8 @@ before editing; prefer additive changes.
 | `service/TProxyService.kt` | `hev-socks5-tunnel` (tun2socks) JNI bridge: TUN ⇄ local SOCKS5. Native byte counters fallback. |
 | `config/XrayConfigBuilder.kt` | Builds the Xray JSON (inbounds: SOCKS5 10808 + API 10809; proxy outbound for the selected server with Reality/XTLS/TLS). **v5.0 (CRITICAL):** `sockopt.dialerProxy` is set **ONLY** for plain-TLS-without-flow configs (chaining to the `frag-dialer` freedom outbound that fragments the ClientHello). It is **NEVER** set for Reality, XTLS-Vision (flow), or plaintext — chaining those through a freedom dialer corrupts the handshake / breaks the Vision splice so the TUN comes up but **no bytes flow** ("fake connected"). v4.9 set dialerProxy on EVERY config, which was the bug. Keep `usesFragmentDialer()` as the single gate. Only emit the `mux` block when mux is actually enabled (never `concurrency: -1`). |
 | `config/ConfigParser.kt` | Parses `vless://` and `vmess://` (and only those) into `ServerConfig`. Handles emoji/symbols/mixed text. |
-| `config/Pinger.kt` | Real proxied ping through an actual Xray outbound to CENSORED endpoints only (NEVER Google). v4.7: ONE confirmed real round-trip == reachable; probes are truly cancellable. |
-| `config/LiveSources.kt` / `SourceFetcher.kt` | 50 live free-config feeds (25 vless + 25 vmess) + resilient mirror fetching. |
+| `config/Pinger.kt` | Real Xray ping to Cloudflare only (never Google). v7 requires tunnel latency plus mandatory fresh payload transfer; TCP is reject-only. |
+| `config/LiveSources.kt` / `SourceFetcher.kt` | 70 direct-origin VLESS/VMESS feeds fetched without mirrors or forwarding services. |
 
 ### How a connection actually happens (the happy path)
 ```
@@ -175,8 +175,8 @@ The admin panel publishes a single JSON file; the app fetches it on launch.
 - **Model:** `config/RemoteConfig.kt` (`ad` + `contact`).
 - **Fetch/cache:** `config/RemoteConfigStore.kt`.
   - `REMOTE_URL = https://prfgame.github.io/adminpanel/app_config.json`
-  - Uses a cached copy instantly, refreshes in the background, has jsDelivr / jina
-    mirror fallbacks so it loads inside Iran.
+  - Uses a cached copy instantly and refreshes directly from the configured origin
+    through the shared `DirectHttp` Cloudflare-DoH client; there are no mirrors.
 - **Loaded in** `NeonApp.onCreate()` (cache load + background refresh).
 
 If you change the JSON schema, change **all three** in lockstep:
@@ -193,7 +193,8 @@ Server 1-100, then 101-200, then 201-300 … — the visible number does **not**
 restart per search and is **not** derived from the in-memory list size. It resets
 to 0 ONLY when the source repo (`aptixzero/con_new`) rotation resets (a new publish,
 which also resets file/offset). Identity/dedup is still by config CONTENT
-(`ConfigParser.dedupKey`), never by visible name.
+(`ConfigParser.dedupKey`), never by visible name. v7 keeps this counter authoritative;
+`AutoTestActivity` must never renumber a batch from 1.
 
 **v6.3 added two panel-driven blocks** (`config/DownloadLinks.kt`):
 
@@ -273,8 +274,8 @@ which also resets file/offset). Identity/dedup is still by config CONTENT
   and `CountryFlags.rememberCode()` caches the country per host.
 - **The Islamic-Republic flag must NEVER be rendered anywhere.** Four defences, keep
   all four: (1) `CountryFlags.emojiOf("IR")` returns `""`; (2)
-  `FlagView.setCountry("IR")` draws the bundled `drawable/flag_ir_lion_sun.xml`
-  (Lion-and-Sun) — this is the **one sanctioned bundled flag image**, and it is local
+  `FlagView.setCountry("IR")` draws the bundled `drawable-nodpi/flag_ir_lion_sun.png`
+  (real historical Lion-and-Sun image) — this is the **one sanctioned bundled flag image**, and it is local
   so it works offline / on weak links; (3) `FlagView.setFlagEmoji()` re-routes any
   incoming IR emoji to that vector; (4) `CountryFlags.sanitizeForDisplay()` strips
   the glyph out of feed-supplied remarks (Home card + `ConfigsFragment` rows),
@@ -561,9 +562,9 @@ PARALLELISM — `SourceFetcher` + `FreeConfigSource` open many ORIGIN feeds at o
 (waves of 8), so one wave costs one timeout instead of eight.
 
 Exempt from `DirectHttp`, by design: `CfDns` itself (it must not recurse into the
-client that depends on it) and the geo-IP / counter helpers in
-`util/CountryFlags.kt` and `stats/UserStatsReporter.kt`, which are plain public
-APIs and not part of the config supply chain.
+client that depends on it) and the user-counter helper. v7 removed every network
+geo-IP fallback from `CountryFlags`; connected identity is authoritative only when
+read from Cloudflare trace through the active tunnel.
 
 ### PING always means: clear → "Pinging…" → new value
 
@@ -746,6 +747,26 @@ let at least one other through. If the pre-gate rejects **every** node (`anyLive
 deep prober unchanged instead of being marked Unreachable. This is the fix for
 «Ping All می‌پرد و هیچ کانفیگی پینگ نمی‌گیرد» in My Configs. Do not "simplify" it
 back to unconditionally trusting wave 1.
+
+---
+
+## 5h. v7 INVARIANTS (do not regress)
+
+- `PingService` has independent `PingStore.MY` and `PingStore.FREE` status flows,
+  sweep flows, jobs, cancellation, hydration, and persistence. Never merge them.
+- Auto Test writes only FREE while testing. A newly accepted My Config row may be
+  seeded once from its real FREE result; an existing MY result is never replaced.
+- Every green ping requires all three: TCP reject gate passed, real Xray Cloudflare
+  latency, and mandatory fresh payload transfer. No history blend or TCP display.
+- Manual and Auto Test work is consumed in stable bounded chunks of at most ten,
+  preserving source/`Server N` order. Successful rows may pin upward immediately.
+- Phase one succeeds only after finding both a usable VLESS source and a usable
+  VMESS source. After 240 tests, the next 240-config cycle starts automatically.
+- `FreeConfigSource` owns persistent monotonic naming and cursor progression uses
+  the last visited source, not the numeric maximum of a wrapped wave.
+- Connected exit country/IP comes only from `fetchTraceThroughTunnel()` and must
+  pass generation/session checks both before and after network I/O.
+- `CountryFlags` performs no third-party geo request. Iran uses the bundled PNG.
 
 ---
 

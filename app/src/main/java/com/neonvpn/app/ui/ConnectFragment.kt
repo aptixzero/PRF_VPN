@@ -22,6 +22,7 @@ import com.neonvpn.app.R
 import com.neonvpn.app.config.ConfigStore
 import com.neonvpn.app.config.RemoteConfig
 import com.neonvpn.app.config.RemoteConfigStore
+import com.neonvpn.app.net.DirectHttp
 import com.neonvpn.app.service.NeonVpnService
 import com.neonvpn.app.ui.widget.GlobeConnectView
 import com.neonvpn.app.util.Format
@@ -32,8 +33,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
-import java.net.HttpURLConnection
-import java.net.URL
+import okhttp3.Request
 
 /**
  * v4.0 HOME / CONNECT screen — matches the UI sheet (screens 02/03/04).
@@ -79,11 +79,9 @@ class ConnectFragment : Fragment() {
     // country whose IP we actually exit from. It is now a custom [FlagView]
     // rather than a TextView, so the flag fills the square EXACTLY (a TextView
     // always leaves font padding, which is why the v6.3 flag looked smaller than
-    // its box), and so Iran can be drawn from the bundled Lion-and-Sun vector
+    // its box), and so Iran can be drawn from the bundled Lion-and-Sun PNG
     // instead of the system font's Islamic-Republic emoji.
     private var flagView: com.neonvpn.app.ui.widget.FlagView? = null
-    /** The host whose flag is currently being resolved (dedupes async callbacks). */
-    @Volatile private var flagHost: String = ""
 
     // v6.3 — in-app announcement card ("اعلان Professor Vpn").
     private var noticeCard: View? = null
@@ -309,12 +307,17 @@ class ConnectFragment : Fragment() {
         if (url.isBlank()) { iv.visibility = View.GONE; return }
         CoroutineScope(Dispatchers.IO).launch {
             val bmp = try {
-                val c = (URL(url).openConnection() as HttpURLConnection).apply {
-                    connectTimeout = 7000; readTimeout = 9000
-                    instanceFollowRedirects = true
-                    setRequestProperty("User-Agent", "ProfessorVPN/4.1")
+                val request = Request.Builder()
+                    .url(url)
+                    .header("User-Agent", "ProfessorVPN/7 (Android)")
+                    .get()
+                    .build()
+                DirectHttp.client.newCall(request).execute().use { response ->
+                    if (!response.isSuccessful) null
+                    else response.body?.byteStream()?.use {
+                        android.graphics.BitmapFactory.decodeStream(it)
+                    }
                 }
-                c.inputStream.use { android.graphics.BitmapFactory.decodeStream(it) }
             } catch (_: Throwable) { null }
             withContext(Dispatchers.Main) {
                 if (isAdded && bmp != null) {
@@ -458,8 +461,8 @@ class ConnectFragment : Fragment() {
             ?.let { com.neonvpn.app.util.CountryFlags.sanitizeForDisplay(it) }
             ?: getString(R.string.no_config)
         updateProtoTabs(selected?.protocol)
-        // v6.3 — the flag square only ever shows something while CONNECTED.
-        renderFlag(state, selected?.address, selected?.remark)
+        // The flag is shown only from the active tunnel's authoritative exit trace.
+        renderFlag(state)
 
         when (state) {
             NeonVpnService.STATE_CONNECTED -> {
@@ -506,61 +509,20 @@ class ConnectFragment : Fragment() {
     // ------------------------------------------------------------------
 
     /**
-     * Paint the square behind the server name.
+     * Paint the square behind the server name from the active tunnel only.
      *
-     * Rules from the brief:
-     *  • default (not connected) → EMPTY square,
-     *  • connected → the flag of the country **whose IP we were given**,
-     *  • the flag must be exactly as wide and as tall as the square,
-     *  • Iran must always be the LION AND SUN flag, even on weak internet,
-     *  • must never lag or freeze the UI.
-     *
-     * Three phases, in order of increasing cost and increasing accuracy:
-     *
-     *   1. **The live exit country** ([VpnStateBus.exit]) — this is the truth.
-     *      It comes from Cloudflare's trace fetched THROUGH the tunnel, so it is
-     *      the country of the IP the internet actually sees. Free to read.
-     *   2. **Instant cache / offline heuristics** — zero I/O, used while the
-     *      trace is still in flight (and forever after on a weak link, since the
-     *      exit country is cached against the host once learned).
-     *   3. **Background geo lookup** — fire-and-forget, applied when it lands.
-     *
-     * The UI thread never blocks on DNS or HTTP in any of them.
+     * The entry hostname and server remark are never country evidence: fronting and
+     * relays routinely place the entry and exit in different countries. Until the
+     * session-guarded Cloudflare trace returns an ISO code, the tile stays empty.
      */
-    private fun renderFlag(state: String, host: String?, remark: String?) {
+    private fun renderFlag(state: String) {
         val fv = flagView ?: return
-        val connected = state == NeonVpnService.STATE_CONNECTED
-        if (!connected || host.isNullOrBlank()) {
-            flagHost = ""
+        if (state != NeonVpnService.STATE_CONNECTED) {
             fv.clearFlag()
             return
         }
-        flagHost = host
-        val ctx = context ?: return
-
-        // Phase 1 — the country of the REAL exit IP, when we already know it.
         val exitCc = VpnStateBus.exit.countryCode
-        if (exitCc.isNotBlank()) {
-            fv.setCountry(exitCc)
-            return
-        }
-
-        // Phase 2 — instant (memory/disk cache + offline text heuristics).
-        val cached = com.neonvpn.app.util.CountryFlags.cachedCodeFor(ctx, host, remark ?: "")
-        fv.setCountry(cached)
-
-        // Phase 3 — background resolve when we still don't know the country.
-        if (cached.isBlank()) {
-            com.neonvpn.app.util.CountryFlags.resolveCodeAsync(
-                ctx.applicationContext, host, remark ?: ""
-            ) { code ->
-                val v = flagView ?: return@resolveCodeAsync
-                // Ignore stale callbacks (user switched server meanwhile).
-                if (flagHost != host) return@resolveCodeAsync
-                if (VpnStateBus.state != NeonVpnService.STATE_CONNECTED) return@resolveCodeAsync
-                v.post { if (isAdded && flagHost == host) v.setCountry(code) }
-            }
-        }
+        if (exitCc.isBlank()) fv.clearFlag() else fv.setCountry(exitCc)
     }
 
     /**
@@ -568,9 +530,8 @@ class ConnectFragment : Fragment() {
      * summary row and repaint the flag with the country that IP belongs to.
      *
      * This is the "after connecting, put the IP of the country it gives you"
-     * part of the brief. Until it arrives the row shows a dash and the flag
-     * falls back to the hostname guess, so nothing ever looks broken while the
-     * trace is still in flight.
+     * part of the brief. Until it arrives the row shows a dash and the flag stays
+     * empty rather than guessing from the entry hostname or server remark.
      */
     private fun renderExit(e: ExitIdentity) {
         if (VpnStateBus.state != NeonVpnService.STATE_CONNECTED) return

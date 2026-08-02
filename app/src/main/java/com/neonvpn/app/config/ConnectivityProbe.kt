@@ -143,7 +143,7 @@ object ConnectivityProbe {
         // ── PHASE 1 (0 → 60 %) — race for the first reachable source per kind ──
         emit(4)
         val reach = raceForFirstReachable(ctx, emit)
-        if (!reach.any) {
+        if (!reach.ready) {
             // Nothing at all answered: the user's internet cannot see any origin.
             Log.w(TAG, "phase 1: no source reachable")
             return Result(emptyList(), reachedSource = false)
@@ -173,7 +173,8 @@ object ConnectivityProbe {
 
     /** Which source index answered first, per kind. */
     private data class Reach(val vless: Int, val vmess: Int) {
-        val any: Boolean get() = vless >= 0 || vmess >= 0
+        /** Phase 1 succeeds only after BOTH protocol families have a live source. */
+        val ready: Boolean get() = vless >= 0 && vmess >= 0
     }
 
     /**
@@ -219,8 +220,16 @@ object ConnectivityProbe {
                         try {
                             // allowCache=false: a race must measure the live network.
                             val body = SourceFetcher.fetch(sources[idx].url, allowCache = false)
-                            val usable = !body.isNullOrBlank() &&
-                                SourceFetcher.extractLinks(body, sources[idx].kind, limit = 1).isNotEmpty()
+                            // A text file answering is not enough. Require at least
+                            // one config in it to accept the same origin socket Xray
+                            // must dial. This is reject-only (never a displayed ping);
+                            // full tunnel + payload proof happens in 60→100%.
+                            val candidates = if (body.isNullOrBlank()) emptyList() else
+                                SourceFetcher.extractLinks(body, sources[idx].kind, limit = 3)
+                            val usable = candidates.any { link ->
+                                val cfg = runCatching { ConfigParser.parseSingleSafe(link) }.getOrNull()
+                                cfg != null && runCatching { TcpProbe.reachable(cfg) }.getOrDefault(false)
+                            }
                             if (usable) win.complete(idx)
                         } catch (_: CancellationException) {
                             throw CancellationException("race cancelled")
@@ -231,11 +240,11 @@ object ConnectivityProbe {
                         }
                     }
                 }
-                // Whoever finishes first wins; we still let the others settle so
-                // their bodies land in SourceFetcher's cache for Phase 2 (free reuse).
-                withTimeoutOrNull(RACE_BUDGET_MS) { runners.awaitAll() }
+                // Return immediately when the first genuinely usable source wins;
+                // never wait for all blocked feeds after a winner already exists.
+                val winner = withTimeoutOrNull(RACE_BUDGET_MS) { win.await() } ?: -1
                 runners.forEach { it.cancel() }
-                if (!win.isCompleted) win.complete(-1)
+                if (!win.isCompleted) win.complete(winner)
             }
 
             val a = launchRace(LiveSources.VLESS, ConnectedSourceStore.vlessSource(ctx), vlessWin)

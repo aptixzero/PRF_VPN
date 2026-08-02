@@ -163,7 +163,7 @@ class FreeConfigsFragment : Fragment() {
     private fun observeSweep() {
         viewLifecycleOwner.lifecycleScope.launch {
             viewLifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {
-                PingService.sweep.collect { s ->
+                PingService.sweep(PingStore.FREE).collect { s ->
                     if (!isAdded) return@collect
                     if (s.running) {
                         // ── v6.9: THE PING PROCESS IS NOW VISIBLE ────────────
@@ -178,7 +178,7 @@ class FreeConfigsFragment : Fragment() {
                         // Only a MANUAL sweep locks the controls. A background Auto
                         // Test must leave the buttons usable, otherwise the user is
                         // frozen out of their own list for as long as it runs.
-                        val manual = PingService.isManualSweepRunning
+                        val manual = PingService.isManualSweepRunning(PingStore.FREE)
                         val a = if (manual) 0.4f else 1f
                         btnPingAll.isEnabled = !manual
                         btnPingAll.alpha = a
@@ -223,20 +223,18 @@ class FreeConfigsFragment : Fragment() {
     private fun observePingStatuses() {
         viewLifecycleOwner.lifecycleScope.launch {
             viewLifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {
-                PingService.statuses.collect { map ->
-                    // v6.0 — during a manual PING ALL sweep, RE-SORT the INSTANT
-                    // each ping lands so the lowest-ping configs pin to the top
-                    // immediately. Auto-scroll to the top only when the user was
-                    // already there, so a reorder never yanks a user who scrolled
-                    // down. (During Auto Test the engine owns the list ordering, so
-                    // we leave that path untouched.)
-                    if (pingAllInFlight && !AutoTestEngine.isRunning) {
-                        val atTop = isAtTop()
+                PingService.statuses(PingStore.FREE).collect { map ->
+                    // v7 — pin every successful result immediately, including
+                    // Auto Test results. The engine still owns persistence while
+                    // it runs; this is a UI-only stable sort, so uncompleted rows
+                    // keep their relative Server N order and no store race exists.
+                    val atTop = isAtTop()
+                    if (adapter.items.isNotEmpty()) {
                         adapter.submitList(ArrayList(adapter.items), map)
-                        if (atTop) scrollToTop()
                     } else {
                         adapter.applyStatuses(map)
                     }
+                    if (atTop) scrollToTop()
                     // Persist the (re-sorted) order — but NOT while Auto Test is
                     // running, because the engine owns the free store then and a
                     // double-writer races (this was a crash source). Snapshot the
@@ -321,7 +319,7 @@ class FreeConfigsFragment : Fragment() {
             // watch the configs that respond, never dragged to the dead ones.
             val atTop = isAtTop()
             // Atomic, crash-proof swap + diff in ONE pass.
-            adapter.submitList(fresh, PingService.statuses.value)
+            adapter.submitList(fresh, PingService.statuses(PingStore.FREE).value)
             refreshEmpty()
             updateListHeader()
             if (atTop) scrollToTop()
@@ -435,7 +433,7 @@ class FreeConfigsFragment : Fragment() {
         // was a no-op with no feedback whatsoever. A manual request now wins: it is
         // only refused by another MANUAL sweep, and every refusal says something.
         if (busy) return
-        if (PingService.isManualSweepRunning) { toast(getString(R.string.testing_ping)); return }
+        if (PingService.isManualSweepRunning(PingStore.FREE)) { toast(getString(R.string.testing_ping)); return }
         if (adapter.items.isEmpty()) { toast(getString(R.string.free_empty)); return }
 
         val started = PingService.pingAll(requireContext(), adapter.items.toList(), PingStore.FREE)
@@ -453,7 +451,7 @@ class FreeConfigsFragment : Fragment() {
             // now publishes running = true synchronously, so this loop can no longer
             // fall through on its first check (the v6.8 race that ended a sweep's UI
             // treatment before it had begun).
-            while (isActive && isAdded && PingService.isManualSweepRunning) {
+            while (isActive && isAdded && PingService.isManualSweepRunning(PingStore.FREE)) {
                 kotlinx.coroutines.delay(250)
             }
             // v5.7 — sort ONCE at the end of a manual sweep (not on every tick),

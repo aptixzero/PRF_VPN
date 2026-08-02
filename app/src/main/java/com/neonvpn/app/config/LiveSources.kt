@@ -1,26 +1,44 @@
 package com.neonvpn.app.config
 
 /**
- * v4.6 LIVE SOURCES (grown to 70 in v6.7) — the direct, live-updating public
- * feeds the app now
- * reads its free configs from (replacing the dead `aptixzero/con_new` GitHub
- * mirror). These are the EXACT 50 links supplied for v4.6, in order.
+ * LIVE SOURCES — the direct, live-updating public feeds the app reads its free
+ * configs from. 70 feeds: **35 VLESS + 35 VMESS**.
  *
- * ── LAYOUT / CONTRACT ───────────────────────────────────────────────────────
- *  • The list is STRICTLY ALTERNATING: index 0 = a VLESS feed, index 1 = a VMESS
- *    feed, index 2 = VLESS, index 3 = VMESS … (25 vless + 25 vmess = 50).
- *  • Every feed updates on its own cadence (by-the-minute / hourly / daily). The
- *    app therefore never bundles a static config; it pulls whatever is live.
- *  • The app ONLY keeps `vless://` and `vmess://` links. Even if a feed happens
- *    to contain trojan / ss / etc., [ConfigParser] drops everything else.
+ * ── LAYOUT / CONTRACT (load-bearing) ────────────────────────────────────────
+ *  • The list is STRICTLY ALTERNATING: index 0 = VLESS, index 1 = VMESS,
+ *    index 2 = VLESS, index 3 = VMESS … [FreeConfigSource] and
+ *    [ConnectivityProbe] both rely on VLESS at even indices, VMESS at odd.
+ *  • Every feed updates on its own cadence (by-the-minute / hourly / daily), so
+ *    the app never bundles a static config — it pulls whatever is live.
+ *  • Only `vless://` and `vmess://` are kept. Even where a feed also carries
+ *    trojan / ss / hysteria, [ConfigParser] drops everything else.
+ *  • 51 feeds are plain "one link per line" text and 19 are base64-wrapped
+ *    subscription blobs; [SourceFetcher.extractLinks] handles both (line scan
+ *    first, base64 decoder only as a fallback).
  *
- * ── WHY WE DON'T SCAN ALL 50 AT ONCE ────────────────────────────────────────
- *  Scanning 50 large feeds simultaneously is slow and heavy on an Iranian
- *  mobile link. Instead the batch builder ([FreeConfigSource]) walks the sources
- *  a FEW at a time, VLESS-then-VMESS, collecting 120 vless + 120 vmess (=240)
- *  per press, and remembers where it stopped so the next press continues from
- *  the next sources. The Auto-Test connectivity probe similarly stops at the
- *  FIRST reachable vless/vmess pair instead of testing all 50.
+ * ── ZERO INTERMEDIARIES (v6.9) ──────────────────────────────────────────────
+ *  Every URL below is the ORIGIN (`raw.githubusercontent.com`). There is no
+ *  jsDelivr / Fastly / gcore mirror chain and no CORS or GitHub proxy anywhere
+ *  in the fetch path — see [SourceFetcher] and [DirectHttp], which pins
+ *  `Proxy.NO_PROXY` and resolves through Cloudflare DoH only.
+ *
+ * ── HOW THE POOL IS CONSUMED (v6.9) ─────────────────────────────────────────
+ *  Auto Test no longer hunts for the *best* feed. [ConnectivityProbe] opens 14
+ *  feeds of EACH kind simultaneously and the FIRST usable body per kind wins;
+ *  [FreeConfigSource] then collects 120 vless + 120 vmess (= 240) per press in
+ *  parallel waves, always advancing its cursor so the next press reads the NEXT
+ *  feeds rather than re-reading an exhausted one.
+ *
+ * ── HEALTH (verified live for v6.9) ─────────────────────────────────────────
+ *  All 70 feeds return a usable body: ~765 000 vless + ~253 000 vmess links
+ *  (~1.02 M total) — roughly 4 000 presses' worth of unique configs.
+ *  Four dead entries were repaired in v6.9:
+ *    • OpenRay moved `output/protocol/` → `output/kind/` (both kinds were 404).
+ *    • Delta-Kronecker stopped publishing a vmess file at all (permanent 404)
+ *      → replaced with V2RayAggregator's merged subscription.
+ *    • V2Hub2's vless split is 0 bytes upstream — HTTP 200 with an EMPTY body,
+ *      which is worse than a 404 because the race counts it as reachable
+ *      → replaced with Delta-Kronecker's SNI vless list.
  */
 object LiveSources {
 
@@ -29,7 +47,7 @@ object LiveSources {
     data class Src(val url: String, val kind: Kind)
 
     /**
-     * The 50 v4.6 sources, alternating VLESS / VMESS exactly as supplied.
+     * All 70 sources, strictly alternating VLESS / VMESS.
      * Order is load-bearing: [FreeConfigSource] and the Auto-Test probe rely on
      * VLESS living at even indices and VMESS at odd indices.
      */
@@ -56,8 +74,11 @@ object LiveSources {
         Src("https://raw.githubusercontent.com/Kwinshadow/TelegramV2rayCollector/main/sublinks/vmess.txt", Kind.VMESS),
         Src("https://raw.githubusercontent.com/sevcator/5ubscrpt10n/main/protocols/vl.txt", Kind.VLESS),
         Src("https://raw.githubusercontent.com/sevcator/5ubscrpt10n/main/protocols/vm.txt", Kind.VMESS),
-        Src("https://raw.githubusercontent.com/sakha1370/OpenRay/refs/heads/main/output/protocol/vless.txt", Kind.VLESS),
-        Src("https://raw.githubusercontent.com/sakha1370/OpenRay/refs/heads/main/output/protocol/vmess.txt", Kind.VMESS),
+        // v6.9 — OpenRay moved `output/protocol/` to `output/kind/`; the old paths
+        // returned HTTP 404, so these two slots were dead weight in every race.
+        // Re-verified live: vless.txt = 7 269 links, vmess.txt = 685 links.
+        Src("https://raw.githubusercontent.com/sakha1370/OpenRay/refs/heads/main/output/kind/vless.txt", Kind.VLESS),
+        Src("https://raw.githubusercontent.com/sakha1370/OpenRay/refs/heads/main/output/kind/vmess.txt", Kind.VMESS),
         Src("https://raw.githubusercontent.com/wiki/gfpcom/free-proxy-list/lists/vless.txt", Kind.VLESS),
         Src("https://raw.githubusercontent.com/wiki/gfpcom/free-proxy-list/lists/vmess.txt", Kind.VMESS),
         Src("https://raw.githubusercontent.com/MahanKenway/Freedom-V2Ray/main/configs/vless.txt", Kind.VLESS),
@@ -77,10 +98,18 @@ object LiveSources {
         Src("https://raw.githubusercontent.com/ShatakVPN/ConfigForge-V2Ray/main/configs/vless.txt", Kind.VLESS),
         Src("https://raw.githubusercontent.com/ShatakVPN/ConfigForge-V2Ray/main/configs/vmess.txt", Kind.VMESS),
         Src("https://raw.githubusercontent.com/Delta-Kronecker/V2ray-Config/refs/heads/main/config/protocols/vless.txt", Kind.VLESS),
-        Src("https://raw.githubusercontent.com/Delta-Kronecker/V2ray-Config/refs/heads/main/config/protocols/vmess.txt", Kind.VMESS),
+        // v6.9 — Delta-Kronecker publishes NO vmess file at all any more (only
+        // vless), so the old vmess URL was a permanent 404. Replaced with
+        // V2RayAggregator's merged subscription, verified live at 2 529 vmess links.
+        Src("https://raw.githubusercontent.com/mahdibland/V2RayAggregator/master/sub/sub_merge.txt", Kind.VMESS),
         Src("https://raw.githubusercontent.com/Argh94/V2RayAutoConfig/refs/heads/main/configs/Vless.txt", Kind.VLESS),
         Src("https://raw.githubusercontent.com/Argh94/V2RayAutoConfig/refs/heads/main/configs/Vmess.txt", Kind.VMESS),
-        Src("https://raw.githubusercontent.com/coldwater-10/V2Hub2/main/Split/Normal/vless", Kind.VLESS),
+        // v6.9 — V2Hub2's `Split/Normal/vless` (and `Split/Base64/vless`) are both
+        // 0 bytes upstream: HTTP 200 with an EMPTY body, which is worse than a 404
+        // because the race treats it as a live source that yields nothing.
+        // Replaced with Delta-Kronecker's SNI vless list, verified live at 2 161
+        // links. The V2Hub2 vmess file is still healthy (815 KB) and stays.
+        Src("https://raw.githubusercontent.com/Delta-Kronecker/V2ray-Config/refs/heads/main/config/sni/protocols/vless_sni.txt", Kind.VLESS),
         Src("https://raw.githubusercontent.com/coldwater-10/V2Hub2/main/Split/Normal/vmess", Kind.VMESS),
         Src("https://raw.githubusercontent.com/Farid-Karimi/Config-Collector/main/vless_iran.txt", Kind.VLESS),
         Src("https://raw.githubusercontent.com/Farid-Karimi/Config-Collector/main/vmess_iran.txt", Kind.VMESS),

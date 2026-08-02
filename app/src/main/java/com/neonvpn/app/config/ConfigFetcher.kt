@@ -282,7 +282,7 @@ object ConfigFetcher {
             val req = okhttp3.Request.Builder()
                 .url(urlStr)
                 .head()
-                .header("User-Agent", "ProfessorVPN/6.9 (Android)")
+                .header("User-Agent", "ProfessorVPN/7 (Android)")
                 .build()
             com.neonvpn.app.net.DirectHttp.client.newCall(req).execute().use { resp ->
                 val lm = resp.headers.getDate("Last-Modified")?.time ?: -1L

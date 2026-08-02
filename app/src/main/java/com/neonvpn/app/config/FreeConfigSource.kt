@@ -318,14 +318,20 @@ object FreeConfigSource {
                     val cfg = try { ConfigParser.parseSingleSafe(link) } catch (_: Throwable) { null } ?: continue
                     if (cfg.protocol != "vless" && cfg.protocol != "vmess") continue
                     val key = ConfigParser.dedupKey(cfg)
-                    if (!seenKeys.add(key)) continue
+                    // VLESS and VMESS collectors run concurrently. HashSet is not
+                    // thread-safe; the old unsynchronised add lost entries and
+                    // occasionally corrupted the set, producing short/empty lists.
+                    val fresh = synchronized(seenKeys) { seenKeys.add(key) }
+                    if (!fresh) continue
                     out.add(cfg)
                 }
                 if (hitSrc != null && out.size > before && hitSrc.get() < 0) hitSrc.set(idx)
             }
             onProgress(out.size)
-            // Resume AFTER the furthest source this wave touched.
-            cursor = ((slice.maxOrNull() ?: cursor) + 1) % n
+            // Resume after the LAST source in visit order. maxOrNull() was wrong
+            // for a wrapping wave such as [33,34,0,1] and restarted at 0 instead
+            // of 2, repeatedly consuming old feeds and starving the next 240.
+            cursor = ((slice.lastOrNull() ?: cursor) + 1) % n
         }
         Log.d(TAG, "collectKind: ${out.size}/$need from $walked feeds, next cursor=$cursor")
         return cursor

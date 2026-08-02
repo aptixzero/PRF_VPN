@@ -19,8 +19,8 @@ selected server. Only **VLESS** and **VMESS** configs are supported.
 - Animated **Liquid Orb** connect control with five states (idle / connecting /
   connected / disconnecting / error) and a live connection-progress arc.
 - My Configs (paste / select / copy / delete / ping all, persisted) and Free Configs
-  (manual search + auto test, real color-coded pings, auto-sorted) backed by a single
-  app-scoped ping service shared across tabs.
+  (manual search + auto test, real color-coded pings, auto-sorted) backed by independent
+  app-scoped ping status, progress, cancellation, and persistence buckets.
 - Panel-controlled Sponsor banner + Contact page (no ad-network scripts).
 - Universal APK: `arm64-v8a`, `armeabi-v7a`, `x86`, `x86_64` (Android 7.0+).
 
@@ -28,37 +28,38 @@ selected server. Only **VLESS** and **VMESS** configs are supported.
 
 The latest signed universal APK is published on the
 [Releases](https://github.com/aptixzero/my_prFF_vP_N/releases/latest) page and mirrored
-in [`build/`](./build). The current artifact is `ProfessorVPN-v6.8-universal.apk`.
-Free configs are fetched live from the **70** public feeds in `LiveSources.kt`.
+in [`build/`](./build). The current artifact is `ProfessorVPN-v7-universal.apk`.
+Free configs are fetched live from the **70** direct-origin feeds in `LiveSources.kt`.
 
-### What's new in v6.8 — see [`RELEASE_NOTES_v6.8.md`](./RELEASE_NOTES_v6.8.md)
+### What's new in v7 — see [`RELEASE_NOTES_v7.md`](./RELEASE_NOTES_v7.md)
 
-v6.8 is the **"make it fast again"** release. It answers one blunt report —
-*"the updates made pinging, Auto Test and adding configs painfully slow; I wait
-over 5 minutes and the app no longer feels fast and stable like v4.2."*
+v7 makes every visible ping an explicit proof of a usable tunnel:
 
-- **Every ping now spins ~3 native cores instead of ~5.** Each real ping builds
-  a throwaway native Xray core, and the count per config is what dominated the
-  wait. v6.8 takes **2** latency samples instead of 3, and — the big one — the
-  Stage-2 payload verdict now issues **one** zero-DNS probe instead of looping
-  over up to three heavy payload URLs (a node that only answered the last one
-  used to pay three full cores). Budgets are tighter too, so a *dying* node stops
-  burning the long tail. The verdict is still a fresh connection carrying real
-  bytes, so *"if it pings, it connects"* stays true — we just stopped paying for
-  it several times over.
-- **Wider deep gates, because each config is now cheaper.** Manual PING ALL runs
-  **6–12** deep probes at once (was 4–8) and Auto Test **5–10** (was 3–6), so the
-  live survivors are measured with real parallelism and low-ping configs land in
-  My Configs within seconds.
-- **"Ping All fires but pings nothing" in My Configs — fixed.** If a momentary
-  link drop makes the wide TCP pre-gate reject *every* node, v6.8 no longer
-  trusts it — it hands the whole list straight to the real prober instead of
-  painting everything red. The pre-gate may only reject when it also let
-  something through.
+- **Real tunnel plus payload or no ping.** TCP can only reject. A green value
+  requires an Xray Cloudflare measurement followed by a fresh connection that
+  transfers a real response body. There is no random value, historical blend,
+  TCP-derived display, or conditional payload shortcut.
+- **Ordered bounded work.** Manual sweeps and Auto Test process stable windows of
+  about ten configs in exact `Server N` order. Successful rows pin to the top as
+  soon as their real result arrives; unfinished rows retain their relative order.
+- **Independent tabs.** My Configs and Free Configs have separate status maps,
+  sweep jobs, progress, cancellation, and persisted results. Auto Test cannot
+  reset or cancel a My Configs sweep. A newly accepted config receives a one-time
+  copy of its validated result without overwriting any existing My result.
+- **Continuous 240-config Auto Test.** Phase one requires one usable VLESS source
+  and one usable VMESS source. Persistent source cursors, synchronized dedup, and
+  monotonic names carry `Server 2400` directly into `Server 2401`; completing a
+  batch automatically starts the next one.
+- **Authoritative exit identity.** Connected IP and country come from Cloudflare
+  trace through the active tunnel and are guarded by the VPN session generation.
+  Iran uses the bundled historical Lion-and-Sun PNG; the Islamic-Republic flag
+  emoji is never generated.
+- **Direct origins only.** Runtime source requests use `Proxy.NO_PROXY`, direct
+  origin URLs, and Cloudflare DoH. No forwarding proxy, generic CORS relay, CDN
+  mirror, Google probe, or third-party geo API is used.
 
-Everything measured is still **real** — no `Random`, no proxies, Cloudflare-only
-probe endpoints, only VLESS/VMESS. The connection core (health check, device-path
-watchdog, IPv4-only TUN, BBR, QUIC-block) is untouched.
+The real `VpnService` lifecycle, device-path payload health gate, stats counters,
+watchdog, IPv4-only TUN, BBR, and QUIC blocking remain intact.
 
 <details>
 <summary>What was new in v6.7</summary>
