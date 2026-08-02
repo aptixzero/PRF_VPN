@@ -13,7 +13,7 @@ import kotlinx.coroutines.withTimeoutOrNull
  * REAL end-to-end reachability test for a single [ServerConfig].
  *
  * ─────────────────────────────────────────────────────────────────────────────
- * v6.9 — MULTIPLE HANDLERS, ONE CORE, STABLE NUMBERS
+ * v7 — MULTIPLE HANDLERS, FRESH PAYLOAD PROOF, NO SYNTHETIC VALUES
  * ─────────────────────────────────────────────────────────────────────────────
  *
  * The brief lists four separate complaints about this file's behaviour:
@@ -36,10 +36,10 @@ import kotlinx.coroutines.withTimeoutOrNull
  *     which is the "one works, then nothing" report.
  *
  * ── THE v6.9 HANDLER CHAIN ──────────────────────────────────────────────────
- * Ping is now a chain of independent HANDLERS, cheapest first. Each one either
- * rejects, or produces a real measurement, or defers to the next. Crucially only
- * the handlers that are actually NEEDED run, so the common case costs ONE native
- * core instead of three.
+ * Ping is a chain of independent HANDLERS, cheapest first. Each one either
+ * rejects, produces a real tunnel measurement, or defers to the next. Every
+ * visible result also pays for a fresh payload verdict; no handler may substitute
+ * a TCP value, cached value, blend, estimate, or prior result.
  *
  *   H0  TCP HANDSHAKE   [TcpProbe.connectMs] — one SYN, 48-wide, ~300 ms.
  *                       Xray dials the node with the same TCP connect, so a
@@ -64,28 +64,13 @@ import kotlinx.coroutines.withTimeoutOrNull
  *                       so it is rejected here instead of in the user's face.
  *
  *   H4  PAYLOAD VERDICT [XrayManager.measureConfigThroughput] — a brand-new
- *                       connection that must carry REAL BYTES.
- *                       v6.9 runs this **conditionally**: only for nodes that look
- *                       marginal (slow, or that produced a single sample). A node
- *                       which answered two fast round-trips has already proven
- *                       both of the things the verdict tests, so charging every
- *                       config a third handshake bought nothing but wall-clock.
+ *                       connection that must carry REAL BYTES. v7 runs this for
+ *                       EVERY candidate result. Without H4 there is no green ping.
  *
- * ── WHY THE NUMBERS STOP JUMPING ────────────────────────────────────────────
- * Two mechanisms, neither of which invents data:
- *   1. The COLD sample is discarded whenever a warm one exists, so the reported
- *      figure describes the tunnel in the state it is in once connected — the same
- *      thing [XrayManager.measureDelayStable] reports, so the list figure and the
- *      connected figure finally agree.
- *   2. [stabilise] blends the new measurement with this config's previous REAL
- *      measurement (70/30) when the two are in the same ballpark. Every input is a
- *      measured round-trip; the blend only removes per-sample jitter. When the new
- *      value differs by more than 2× the old one is discarded outright, so a node
- *      that genuinely got worse still reports the truth immediately.
- *
- * Golden Rule #2 holds throughout: no `Random`, no estimate, no synthesis. Every
- * number displayed is derived exclusively from measured round-trips through the
- * real outbound.
+ * The cold sample is discarded whenever a confirmed warm one exists, but there is
+ * no cross-run smoothing or history blend. Golden Rule #2 holds throughout: no
+ * `Random`, estimate, synthesis, or stale value. Every displayed number is the
+ * fresh measured round-trip from this exact run through the real outbound.
  */
 object Pinger {
 
@@ -99,10 +84,10 @@ object Pinger {
      * combined). Callers must treat [ping] as already-bounded and must NOT wrap it
      * in a shorter timeout (that was the v4.2 starvation bug).
      *
-     * v6.9 — 6 s → 5 s, affordable because H4 is now conditional: the budget no
-     * longer has to cover three guaranteed handshakes.
+     * v7 reserves enough time for the latency handlers and the mandatory fresh
+     * payload verdict while still bounding a dead config to eight seconds.
      */
-    const val PER_CONFIG_BUDGET_MS = 5_000L
+    const val PER_CONFIG_BUDGET_MS = 8_000L
 
     /**
      * Per single round-trip ceiling (one endpoint, one measurement). With DNS out
@@ -112,7 +97,7 @@ object Pinger {
     private const val PER_PROBE_BUDGET_MS = 2_200L
 
     /** Budget for the H4 payload verdict (a full fresh handshake + a real body). */
-    private const val VERDICT_BUDGET_MS = 3_000L
+    private const val VERDICT_BUDGET_MS = 3_200L
 
     /**
      * Pause before the verdict connection: long enough that H4 MUST open a
@@ -149,26 +134,9 @@ object Pinger {
     /** Latency upper bound for a node we still treat as "reachable". */
     private const val MAX_VALID_MS = 8_000L
 
-    /**
-     * Above this the node is "marginal" and must still pass the H4 payload verdict.
-     * Below it, two clean warm round-trips are accepted as proof on their own —
-     * which is where most of v6.9's sweep speed-up comes from.
-     */
-    private const val MARGINAL_MS = 1_200L
-
-    /**
-     * Last REAL measurement per config, used by [stabilise] to damp jitter.
-     * Bounded so a long-running engine cannot grow it without limit.
-     */
-    private val lastGood = java.util.Collections.synchronizedMap(
-        object : LinkedHashMap<String, Long>(512, 0.75f, false) {
-            override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Long>?): Boolean =
-                size > 4_000
-        }
-    )
-
-    /** Drop the smoothing memory (called when a list is cleared / re-tested cold). */
-    fun resetHistory() = lastGood.clear()
+    /** v7 has no synthetic smoothing/history: the displayed value is the fresh
+     * confirmed warm tunnel measurement from this exact run. */
+    fun resetHistory() = Unit
 
     suspend fun ping(cfg: ServerConfig): Long = withContext(Dispatchers.IO) {
         // Only vless / vmess are buildable; anything else is unreachable here.
@@ -191,8 +159,6 @@ object Pinger {
             return@withContext UNREACHABLE
         }
 
-        val key = try { ConfigParser.pingKey(cfg) } catch (_: Throwable) { "${cfg.address}:${cfg.port}" }
-
         val result = withTimeoutOrNull(PER_CONFIG_BUDGET_MS) {
             // ── H1 / H2 — LOCK ONTO A REFERENCE EDGE ──────────────────────────
             // H1 is the zero-DNS IP literal. If it is specifically being reset we
@@ -212,22 +178,13 @@ object Pinger {
             // rejected now rather than after the user taps connect.
             val warm = singleProbe(json, ref).let { if (it in 1..MAX_VALID_MS) it else UNREACHABLE }
 
-            val reported: Long
-            if (warm > 0) {
-                reported = warm
-                // ── H4 — PAYLOAD VERDICT, ONLY IF MARGINAL ────────────────────
-                // Two clean warm round-trips already demonstrate a fresh handshake
-                // through DPI plus a working outbound. Only nodes that look shaky
-                // pay for the third handshake.
-                if (warm > MARGINAL_MS && !runVerdict(json, cfg)) return@withTimeoutOrNull UNREACHABLE
-            } else {
-                // Single sample only → we have NOT seen the node survive a second
-                // request, so the payload verdict is mandatory here.
-                if (!runVerdict(json, cfg)) return@withTimeoutOrNull UNREACHABLE
-                reported = cold
-            }
+            // v7 — payload proof is mandatory for EVERY green ping. TCP is only
+            // a reject gate and a Cloudflare latency response alone is not enough:
+            // a fresh Xray connection must carry a real response body too.
+            val reported = if (warm > 0) warm else cold
             if (reported !in 1..MAX_VALID_MS) return@withTimeoutOrNull UNREACHABLE
-            stabilise(key, reported)
+            if (!runVerdict(json, cfg)) return@withTimeoutOrNull UNREACHABLE
+            reported
         }
         result ?: UNREACHABLE
     }
@@ -241,27 +198,6 @@ object Pinger {
                 "but cannot carry a payload (would have been a fake green)")
         }
         return carried
-    }
-
-    /**
-     * Damp per-sample jitter so a config's number stops dancing between sweeps
-     * («پینگ ها نباید مدام تغییر کنند»).
-     *
-     * Both inputs are REAL measured round-trips for THIS config. When they are in
-     * the same ballpark we report a 70/30 blend, which removes the couple-of-
-     * hundred-millisecond noise of a mobile link. When the new measurement differs
-     * by more than 2× the history is thrown away and the fresh truth is reported
-     * immediately — a node that really degraded must not be flattered.
-     */
-    private fun stabilise(key: String, fresh: Long): Long {
-        val prev = lastGood[key]
-        val out = if (prev != null && prev > 0 &&
-            fresh <= prev * 2 && prev <= fresh * 2
-        ) {
-            ((fresh * 7 + prev * 3) / 10).coerceAtLeast(1L)
-        } else fresh
-        lastGood[key] = out
-        return out
     }
 
     /**

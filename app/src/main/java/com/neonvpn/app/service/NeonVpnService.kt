@@ -655,10 +655,17 @@ class NeonVpnService : VpnService() {
             var attempt = 0
             while (running && !stopping && attempt < 4) {
                 attempt++
-                try { Thread.sleep(if (attempt == 1) 1200L else 4000L) } catch (_: InterruptedException) { return@thread }
+                // The connection is already payload-verified. Resolve immediately;
+                // only retries wait, so country display adds no post-connect delay.
+                if (attempt > 1) {
+                    try { Thread.sleep(1_500L) } catch (_: InterruptedException) { return@thread }
+                }
                 if (!running || stopping || isStale(gen)) return@thread
                 val body = try { xray.fetchTraceThroughTunnel() } catch (_: Throwable) { null }
                 if (body.isNullOrBlank()) continue
+                // A config switch may complete while the trace request is in flight.
+                // Never allow an old session to overwrite the new exit identity.
+                if (!running || stopping || isStale(gen) || sessionEpoch != gen) return@thread
 
                 var ip = ""
                 var loc = ""
@@ -669,6 +676,7 @@ class NeonVpnService : VpnService() {
                     }
                 }
                 if (ip.isBlank() && loc.isBlank()) continue
+                if (!running || stopping || isStale(gen) || sessionEpoch != gen) return@thread
 
                 // Cache the country against the server host so a reconnect to the
                 // same node paints the correct flag instantly, with zero I/O —
@@ -1067,7 +1075,7 @@ class NeonVpnService : VpnService() {
                 readTimeout = timeoutMs
                 requestMethod = "GET"
                 useCaches = false
-                setRequestProperty("User-Agent", "ProfessorVPN/6.9 (Android)")
+                setRequestProperty("User-Agent", "ProfessorVPN/7 (Android)")
                 setRequestProperty("Connection", "close")
             }
             try {

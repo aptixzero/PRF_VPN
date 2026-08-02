@@ -310,7 +310,7 @@ class XrayManager(private val context: Context) {
             readTimeout = 6000
             requestMethod = "GET"
             instanceFollowRedirects = true
-            setRequestProperty("User-Agent", "ProfessorVPN/6.9 (Android)")
+            setRequestProperty("User-Agent", "ProfessorVPN/7 (Android)")
             setRequestProperty("Accept", "*/*")
         }
         return try {

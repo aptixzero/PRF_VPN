@@ -100,7 +100,7 @@ class ConfigsFragment : Fragment() {
         btnCopySel.setOnClickListener { copySelected() }
         btnDeleteSel.setOnClickListener { deleteSelected() }
         btnPingAll.setOnClickListener { pingAll() }
-        // v6.3 — stop the running Ping-All cleanly. PingService.cancel() is
+        // v6.3 — stop the running Ping-All cleanly. PingService.cancel(PingStore.MY) is
         // co-operative: in-flight probes finish/abort on their own and the
         // already-measured results stay in the list, so nothing is disrupted.
         btnCancelPing?.setOnClickListener { cancelPingAll() }
@@ -121,7 +121,7 @@ class ConfigsFragment : Fragment() {
     private fun observeSweep() {
         viewLifecycleOwner.lifecycleScope.launch {
             viewLifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {
-                PingService.sweep.collect { s ->
+                PingService.sweep(PingStore.MY).collect { s ->
                     if (!isAdded) return@collect
                     if (s.running) {
                         // ── v6.9: THE PING PROGRESS BAR ──────────────────────
@@ -140,7 +140,7 @@ class ConfigsFragment : Fragment() {
                         // Only a MANUAL sweep may lock the controls. A background
                         // Auto Test must leave PING ALL usable, otherwise the user
                         // can never re-ping while Auto Test is on.
-                        val manual = PingService.isManualSweepRunning
+                        val manual = PingService.isManualSweepRunning(PingStore.MY)
                         btnPingAll.isEnabled = !manual
                         btnPingAll.alpha = if (manual) 0.4f else 1f
                         btnSelectMode.isEnabled = !manual
@@ -175,7 +175,7 @@ class ConfigsFragment : Fragment() {
     private fun cancelPingAll() {
         btnCancelPing?.isEnabled = false
         btnCancelPing?.alpha = 0.5f
-        runCatching { PingService.cancel() }
+        runCatching { PingService.cancel(PingStore.MY) }
         pingAllInFlight = false
         if (isAdded) {
             android.widget.Toast.makeText(
@@ -192,7 +192,7 @@ class ConfigsFragment : Fragment() {
     private fun observePingStatuses() {
         viewLifecycleOwner.lifecycleScope.launch {
             viewLifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {
-                PingService.statuses.collect { map ->
+                PingService.statuses(PingStore.MY).collect { map ->
                     // v6.0 — while a manual PING ALL is in flight, RE-SORT the list
                     // the INSTANT each ping lands so the configs with the LOWEST
                     // ping are pinned to the top immediately (the v6 brief: "the
@@ -232,7 +232,7 @@ class ConfigsFragment : Fragment() {
                     val atTop = isAtTop()
                     runCatching {
                         adapter.selectedId = store.getSelectedId()
-                        adapter.submitList(store.getServers(), PingService.statuses.value)
+                        adapter.submitList(store.getServers(), PingService.statuses(PingStore.MY).value)
                         emptyView.visibility = if (adapter.items.isEmpty()) View.VISIBLE else View.GONE
                     }
                     // Keep the user at the top (where the healthy configs are) as
@@ -458,7 +458,7 @@ class ConfigsFragment : Fragment() {
         // is also true while the background Auto Test is pinging, so tapping PING
         // ALL during an Auto Test returned here silently and the user saw nothing
         // happen at all — the reported «Ping all یهو میپره و هیچی پینگ نمیگیره».
-        if (PingService.isManualSweepRunning) return
+        if (PingService.isManualSweepRunning(PingStore.MY)) return
         val started = PingService.pingAll(requireContext(), adapter.items.toList(), PingStore.MY)
         if (!started) {
             // Should be unreachable (we just checked), but never leave the tap
@@ -481,7 +481,7 @@ class ConfigsFragment : Fragment() {
                 // v6.9 — `pingAll` publishes running = true synchronously before it
                 // returns, so this loop can no longer exit on its very first check
                 // (the v6.8 race that made a sweep look like it never happened).
-                while (isResumedSafe() && PingService.isManualSweepRunning) {
+                while (isResumedSafe() && PingService.isManualSweepRunning(PingStore.MY)) {
                     kotlinx.coroutines.delay(250)
                 }
                 pingAllInFlight = false
@@ -512,7 +512,7 @@ class ConfigsFragment : Fragment() {
         // When this tab becomes visible again (e.g. user saved a config from the
         // Free tab), reload the list and re-render the latest live ping statuses.
         if (!hidden && ::adapter.isInitialized) {
-            adapter.applyStatuses(PingService.statuses.value)
+            adapter.applyStatuses(PingService.statuses(PingStore.MY).value)
             refresh()
         }
     }
@@ -529,7 +529,7 @@ class ConfigsFragment : Fragment() {
         // RecyclerView ("Inconsistency detected" crash).
         runCatching {
             adapter.selectedId = store.getSelectedId()
-            adapter.submitList(store.getServers(), PingService.statuses.value)
+            adapter.submitList(store.getServers(), PingService.statuses(PingStore.MY).value)
             emptyView.visibility = if (adapter.items.isEmpty()) View.VISIBLE else View.GONE
             updateActionLabels()
         }

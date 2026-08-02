@@ -237,19 +237,10 @@ class AutoTestActivity : BaseActivity() {
         if (configs.isEmpty()) return@withContext 0
         val freeStore = FreeConfigStore(applicationContext)
 
-        // Number them "Server 1..N" and bake the name into the raw link's remark.
-        val named = ArrayList<ServerConfig>(configs.size)
-        var n = 0
-        for (cfg in configs) {
-            n++
-            val name = "Server $n"
-            named.add(
-                cfg.copy(
-                    remark = name,
-                    rawLink = ConfigParser.rewriteRemark(cfg.rawLink, name)
-                )
-            )
-        }
+        // FreeConfigSource already assigned persistent monotonic Server N names.
+        // Never renumber a later batch back to 1: Server 12000 must be followed by
+        // 12001, 12002 … in the exact source order.
+        val named = ArrayList(configs)
 
         // REPLACE the previous Free batch with this brand-new one.
         runCatching { freeStore.replaceAll(named) }
