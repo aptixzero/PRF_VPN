@@ -1,8 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<!-- v6.3 — the "Cancel" pill shown above the Ping-All progress bar.
-     Uses the theme's accent-red so it reads as a stop action in both themes. -->
-<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
-    <corners android:radius="10dp" />
-    <solid android:color="?attr/appAccentRed" />
-    <stroke android:width="1dp" android:color="#33FFFFFF" />
-</shape>

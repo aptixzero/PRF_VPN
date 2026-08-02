@@ -1,6 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<!-- v6.3 — the only thing we ever expose is the APK copy we place in
-     cache/share for the Bluetooth hand-off. Nothing else is shareable. -->
-<paths>
-    <cache-path name="share" path="share/" />
-</paths>
