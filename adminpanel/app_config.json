@@ -1,0 +1,107 @@
+{
+  "version": 26,
+  "latestApkVersion": "7",
+  "appLogo": {
+    "url": ""
+  },
+  "inAppTelegramUrl": "https://t.me/Professor_ch",
+  "contact": {
+    "text": "جهت ثبت تبلیغات و استعلام قیمت بنر به آیدی زیر در تلگرام پیام دهید:",
+    "telegramId": "@mx_pr",
+    "telegramUrl": "https://t.me/mx_pr"
+  },
+  "appBanner": {
+    "enabled": true,
+    "title": "",
+    "subtitle": "",
+    "bgColor": "#11161C",
+    "textColor": "#000000",
+    "imageUrl": "https://raw.githubusercontent.com/aptixzero/PRF_VPN/main/adminpanel/media/banner_1783146541004.png?v=1783146544198",
+    "action": "url",
+    "actionUrl": "https://t.me/Professor_ch"
+  },
+  "homeCta": {
+    "enabled": true,
+    "labelFa": "عضو کانال تلگرام شوید",
+    "labelEn": "Join our Telegram channel",
+    "url": "https://t.me/Professor_ch"
+  },
+  "homeBanner": {
+    "enabled": true,
+    "imageUrl": "https://raw.githubusercontent.com/aptixzero/PRF_VPN/main/adminpanel/media/banner_1783146541004.png?v=1783146544198",
+    "text": "",
+    "textColor": "#000000",
+    "url": "https://t.me/Professor_ch"
+  },
+  "donate": {
+    "enabled": true,
+    "heading": "از پروژه حمایت کنید",
+    "note": "حمایت شما سرورها را پایدار و پرسرعت نگه می‌دارد",
+    "items": []
+  },
+  "downloadLinks": {
+    "enabled": true,
+    "heading": "لینک‌های دانلود",
+    "note": "برای دریافت آخرین نسخه Professor VPN از لینک‌های زیر استفاده کنید.",
+    "items": [
+      {
+        "id": "dl_0",
+        "title": "صفحه دانلود برنامه",
+        "url": "https://professorvpn.vercel.app/",
+        "note": ""
+      }
+    ]
+  },
+  "qrLink": {
+    "enabled": true,
+    "url": "https://professorvpn.vercel.app/",
+    "caption": "این بارکد را با دوربین گوشی اسکن کنید"
+  },
+  "qrcode": {
+    "enabled": true,
+    "url": "https://professorvpn.vercel.app/",
+    "caption": "این بارکد را با دوربین گوشی اسکن کنید"
+  },
+  "notice": {
+    "enabled": false,
+    "title": "اعلان Professor Vpn",
+    "text": "",
+    "id": "",
+    "color": "#8a3ffc"
+  },
+  "ts": 1784976834455,
+  "lastUpdatedAt": 1784976834455,
+  "inAppTelegram": {
+    "url": "https://t.me/Professor_ch"
+  },
+  "ad": {
+    "enabled": true,
+    "title": "",
+    "subtitle": "",
+    "bgColor": "#11161C",
+    "textColor": "#000000",
+    "imageUrl": "https://raw.githubusercontent.com/aptixzero/PRF_VPN/main/adminpanel/media/banner_1783146541004.png?v=1783146544198",
+    "action": "url",
+    "actionUrl": "https://t.me/Professor_ch"
+  },
+  "downloads": {
+    "enabled": true,
+    "heading": "لینک‌های دانلود",
+    "note": "برای دریافت آخرین نسخه Professor VPN از لینک‌های زیر استفاده کنید.",
+    "items": [
+      {
+        "id": "dl_0",
+        "title": "صفحه دانلود برنامه",
+        "url": "https://professorvpn.vercel.app/",
+        "note": ""
+      }
+    ]
+  },
+  "notification": {
+    "enabled": false,
+    "title": "اعلان Professor Vpn",
+    "text": "",
+    "id": "",
+    "color": "#8a3ffc"
+  }
+}

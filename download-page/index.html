@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Professor VPN — دانلود</title>
+<meta name="description" content="دانلود Professor VPN — فیلترشکن سریع و امن اندروید با هسته واقعی Xray (VLESS / VMESS)">
+<meta name="theme-color" content="#000000">
+<link rel="icon" href="logo.png">
+<style>
+:root{
+  --bg:#000000; --bg2:#040406; --card:rgba(14,12,20,.72); --card2:rgba(22,18,32,.6);
+  --line:rgba(255,255,255,.08); --line2:rgba(168,85,247,.42);
+  --violet:#a855f7; --violet2:#c084fc; --violet-d:#6d28d9;
+  --txt:#f5f3fb; --dim:#867f95;
+}
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+html{-webkit-text-size-adjust:100%}
+body{
+  background:
+    radial-gradient(1100px 560px at 50% -14%, rgba(168,85,247,.12), transparent 60%),
+    radial-gradient(760px 520px at 92% 6%, rgba(129,140,248,.08), transparent 55%),
+    var(--bg);
+  color:var(--txt); line-height:1.85; overflow-x:hidden; min-height:100vh;
+  font-family:'Vazirmatn',system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;
+}
+a{color:var(--violet2);text-decoration:none}
+.hidden{display:none!important}
+.wrap{max-width:760px;margin:0 auto;padding:clamp(28px,7vw,64px) clamp(16px,5vw,28px) 48px}
+
+/* ---------- hero ---------- */
+.hero{text-align:center}
+.logo{width:clamp(96px,24vw,132px);height:clamp(96px,24vw,132px);margin:0 auto 18px;display:block;
+  object-fit:cover;border-radius:28px;border:1px solid var(--line2);
+  filter:drop-shadow(0 0 34px rgba(168,85,247,.4));
+  box-shadow:0 0 60px rgba(168,85,247,.14), inset 0 1px 0 rgba(255,255,255,.06)}
+.brand{
+  font-size:clamp(32px,10vw,58px);font-weight:900;letter-spacing:.05em;color:var(--txt);
+  text-shadow:0 0 22px rgba(168,85,247,.5), 0 0 56px rgba(168,85,247,.22);
+  animation:brandPulse 4s ease-in-out infinite;
+}
+@keyframes brandPulse{0%,100%{text-shadow:0 0 20px rgba(168,85,247,.45),0 0 50px rgba(168,85,247,.2)}
+  50%{text-shadow:0 0 30px rgba(168,85,247,.75),0 0 78px rgba(168,85,247,.38)}}
+.tag{color:var(--violet2);font-size:clamp(10px,3vw,13px);letter-spacing:.34em;margin-top:12px}
+.ver{display:inline-block;margin-top:18px;font-size:12.5px;color:var(--violet2);
+  border:1px solid var(--line2);padding:6px 20px;border-radius:22px;letter-spacing:.12em;
+  background:rgba(168,85,247,.06)}
+
+/* ---------- buttons ---------- */
+.actions{display:flex;flex-direction:column;align-items:center;gap:12px;margin-top:clamp(22px,6vw,34px)}
+.btn{display:flex;align-items:center;justify-content:center;gap:11px;
+  width:100%;max-width:420px;padding:clamp(15px,4vw,18px);border-radius:15px;cursor:pointer;
+  font-size:clamp(15px,4vw,17px);font-weight:800;letter-spacing:.02em;font-family:inherit;
+  border:1px solid transparent;transition:transform .16s, box-shadow .16s, border-color .16s}
+.btn-dl{background:linear-gradient(135deg,var(--violet2),var(--violet-d));color:#fff;
+  border:1px solid rgba(255,255,255,.18);box-shadow:0 10px 34px rgba(168,85,247,.32)}
+.btn-dl:hover{transform:translateY(-2px);box-shadow:0 16px 46px rgba(168,85,247,.5)}
+.btn-dl:active{transform:translateY(0)}
+.btn-ghost{background:rgba(255,255,255,.03);color:var(--txt);border:1px solid var(--line)}
+.btn-ghost:hover{border-color:var(--line2);transform:translateY(-1px)}
+.dl-meta{text-align:center;color:var(--dim);font-size:12px;margin-top:4px}
+
+/* ---------- changelog (what's new) ---------- */
+.changelog{margin-top:clamp(22px,6vw,30px);border:1px solid var(--line);border-radius:18px;
+  padding:clamp(18px,5vw,24px);background:var(--card);backdrop-filter:blur(14px);
+  -webkit-backdrop-filter:blur(14px);box-shadow:0 16px 50px rgba(0,0,0,.4)}
+.changelog h2{font-size:clamp(14px,4vw,16px);letter-spacing:.04em;margin-bottom:6px;
+  display:inline-flex;align-items:center;gap:9px}
+.changelog h2 .dot{width:8px;height:8px;border-radius:50%;background:var(--violet2);
+  box-shadow:0 0 12px var(--violet)}
+.changelog .cl-ver{color:var(--dim);font-size:12px;margin-bottom:12px}
+.changelog ul{list-style:none;margin:0;padding:0}
+.changelog li{position:relative;padding:7px 0 7px 22px;font-size:13.5px;color:var(--txt);
+  line-height:1.85;border-bottom:1px solid rgba(255,255,255,.05)}
+.changelog li:last-child{border-bottom:0}
+.changelog li::before{content:"";position:absolute;right:0;top:15px;width:7px;height:7px;
+  border-radius:50%;background:var(--violet2);box-shadow:0 0 9px var(--violet)}
+/* RTL: bullet sits on the right, so pad the inline-start (right) edge */
+html[dir="rtl"] .changelog li{padding:7px 22px 7px 0}
+
+/* ---------- website banner (independent from app banner) ---------- */
+.web-banner{margin-top:clamp(26px,7vw,40px);border:1px solid var(--line);border-radius:18px;
+  min-height:110px;display:flex;flex-direction:column;align-items:center;justify-content:center;
+  text-align:center;padding:20px;cursor:pointer;overflow:hidden;
+  background:var(--card);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);
+  box-shadow:0 16px 50px rgba(0,0,0,.4), inset 0 1px 0 rgba(255,255,255,.04);transition:.18s}
+.web-banner:hover{border-color:var(--line2)}
+.web-banner .bt{font-weight:800;font-size:15px}
+.web-banner .bs{font-size:12px;opacity:.82;margin-top:6px}
+.web-banner img{max-width:100%;max-height:200px;border-radius:12px;display:block}
+
+/* ---------- support / contact ---------- */
+.support{margin-top:22px;border:1px solid var(--line);border-radius:18px;padding:clamp(18px,5vw,24px);
+  background:var(--card);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);text-align:center;
+  box-shadow:0 16px 50px rgba(0,0,0,.4)}
+.support h2{font-size:clamp(14px,4vw,16px);letter-spacing:.04em;margin-bottom:10px;
+  display:inline-flex;align-items:center;gap:9px}
+.support h2 .dot{width:8px;height:8px;border-radius:50%;background:var(--violet2);
+  box-shadow:0 0 12px var(--violet)}
+.support .txt{color:var(--dim);font-size:13px;margin-bottom:14px}
+.contact-id{display:flex;gap:10px;align-items:center;justify-content:center;flex-wrap:wrap}
+.contact-id .chip{background:rgba(0,0,0,.45);border:1px solid var(--line);border-radius:11px;
+  padding:9px 16px;font-weight:800;color:var(--violet2);letter-spacing:.05em}
+.contact-id .mini{border:1px solid var(--line);background:rgba(255,255,255,.03);color:var(--txt);
+  border-radius:11px;padding:9px 16px;font-weight:700;font-size:13px;cursor:pointer;transition:.15s}
+.contact-id .mini:hover{border-color:var(--line2)}
+.contact-id .mini.primary{background:linear-gradient(135deg,var(--violet2),var(--violet-d));
+  color:#fff;border-color:rgba(255,255,255,.18)}
+
+/* ---------- footer ---------- */
+footer{text-align:center;color:var(--dim);font-size:11.5px;padding:30px 0 6px;
+  border-top:1px solid var(--line);margin-top:30px;letter-spacing:.06em}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <!-- hero -->
+  <div class="hero">
+    <img src="logo.png" alt="Professor VPN" class="logo" id="site-logo">
+    <h1 class="brand">PROFESSOR VPN</h1>
+    <div class="tag">VLESS · VMESS · XRAY CORE</div>
+    <div class="ver" id="latest-ver">v3.8</div>
+  </div>
+
+  <!-- actions -->
+  <div class="actions">
+    <button class="btn btn-dl" id="main-dl">⬇ دانلود مستقیم برای اندروید</button>
+    <button class="btn btn-ghost" id="support-btn">پشتیبانی و ارتباط</button>
+    <div class="dl-meta" id="dl-meta">APK یونیورسال · امضا شده · Android 7+</div>
+  </div>
+
+  <!-- changelog (populated from the download manifest) -->
+  <div class="changelog hidden" id="changelog">
+    <h2><span class="dot"></span> <span>تازه‌های این نسخه</span></h2>
+    <div class="cl-ver" id="cl-ver"></div>
+    <ul id="cl-list"></ul>
+  </div>
+
+  <!-- website banner (admin-controlled, independent from in-app banner) -->
+  <div class="web-banner" id="web-banner">
+    <img id="wb-img" class="hidden" alt="">
+    <div class="bt" id="wb-title">محل تبلیغ شما</div>
+    <div class="bs" id="wb-subtitle">جهت ثبت تبلیغ با ما در ارتباط باشید</div>
+  </div>
+
+  <!-- support / contact -->
+  <div class="support" id="support">
+    <h2><span class="dot"></span> <span id="contact-title">پشتیبانی</span></h2>
+    <div class="txt" id="contact-text">جهت ثبت تبلیغات و استعلام قیمت بنر با ما در ارتباط باشید.</div>
+    <div class="contact-id">
+      <span class="chip" id="contact-chip">@mx_pr</span>
+      <button class="mini" id="copy-id">کپی آیدی</button>
+      <button class="mini primary" id="send-msg">ارسال پیام</button>
+    </div>
+  </div>
+
+  <footer>© Professor VPN — <span id="year"></span></footer>
+</div>
+
+<script src="config-loader.js"></script>
+</body>
+</html>
