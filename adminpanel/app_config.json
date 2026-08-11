@@ -1,6 +1,6 @@
 {
-  "version": 26,
-  "latestApkVersion": "7",
+  "version": 27,
+  "latestApkVersion": "7.1",
   "appLogo": {
     "url": ""
   },
@@ -16,7 +16,7 @@
     "subtitle": "",
     "bgColor": "#11161C",
     "textColor": "#000000",
-    "imageUrl": "https://raw.githubusercontent.com/aptixzero/PRF_VPN/main/adminpanel/media/banner_1783146541004.png?v=1783146544198",
+    "imageUrl": "",
     "action": "url",
     "actionUrl": "https://t.me/Professor_ch"
   },
@@ -28,7 +28,7 @@
   },
   "homeBanner": {
     "enabled": true,
-    "imageUrl": "https://raw.githubusercontent.com/aptixzero/PRF_VPN/main/adminpanel/media/banner_1783146541004.png?v=1783146544198",
+    "imageUrl": "",
     "text": "",
     "textColor": "#000000",
     "url": "https://t.me/Professor_ch"
@@ -80,7 +80,7 @@
     "subtitle": "",
     "bgColor": "#11161C",
     "textColor": "#000000",
-    "imageUrl": "https://raw.githubusercontent.com/aptixzero/PRF_VPN/main/adminpanel/media/banner_1783146541004.png?v=1783146544198",
+    "imageUrl": "",
     "action": "url",
     "actionUrl": "https://t.me/Professor_ch"
   },
