@@ -1,10 +1,10 @@
 {
-  "version": 15,
-  "updated_at": "2026-08-11T00:00:00Z",
+  "version": 16,
+  "updated_at": "2026-08-13T00:00:00Z",
   "app": {
     "name": "Professor VPN",
-    "latest_version": "7.1",
-    "latest_version_code": 52,
+    "latest_version": "7.2",
+    "latest_version_code": 53,
     "contact": {
       "title": "پشتیبانی",
       "text": "جهت ثبت تبلیغات و استعلام قیمت بنر به آیدی زیر در تلگرام پیام دهید:",
@@ -14,21 +14,25 @@
   },
   "downloads": [
     {
-      "id": "dl_710",
-      "version": "7.1",
-      "url": "https://github.com/aptixzero/my_prFF_vP_N/releases/download/v7.1/ProfessorVPN-v7.1-universal.apk",
-      "mirror_url": "https://github.com/aptixzero/my_prFF_vP_N/releases/latest/download/ProfessorVPN-v7.1-universal.apk",
+      "id": "dl_720",
+      "version": "7.2",
+      "url": "https://github.com/aptixzero/my_prFF_vP_N/releases/download/v7.2/ProfessorVPN-v7.2-universal.apk",
+      "mirror_url": "https://github.com/aptixzero/my_prFF_vP_N/releases/latest/download/ProfessorVPN-v7.2-universal.apk",
       "size": "57 MB",
-      "notes": "نسخه ۷.۱ — پینگ واقعی با کیفیت throughput، اتو تست بی‌وقفه، پایداری روی اینترنت سیمکارت، ضد دیباگ",
-      "date": "2026-08-11T00:00:00Z",
+      "notes": "نسخه ۷.۲ — اتصال مستقیم بدون واسط DNS و پروکسی، پینگ واقعی و پایدار، اتو تست خودکار با خاموش شدن هنگام بستن برنامه، هوشمندسازی paste from clipboard",
+      "date": "2026-08-13T00:00:00Z",
       "changelog": [
-        "پینگ واقعی با اندازه‌گیری throughput واقعی — کانفیگ‌هایی که پینگ پایین اما سرعت پایین دارند رد می‌شوند",
-        "اتو تست هرگز متوقف نمی‌شود — حتی روی اینترنت ضعیف به تلاش ادامه می‌دهد و فقط با قطع کامل اینترنت می‌ایستد",
-        "پایداری بالا روی اینترنت سیمکارت — تشخیص تغییر شبکه و اتصال مجدد خودکار",
-        "محافظت ضد دیباگ — جلوگیری از دیباگ کردن برنامه و دسترسی روت",
-        "حذف تمام کامنت‌ها و توضیحات از کد برنامه",
-        "پنل ادمین جدید با احراز هویت",
-        "بهینه‌سازی پینگ بر اساس نوع شبکه (وایفای/سلولی)"
+        "حذف کامل DNS و پروکسی واسط — اتصال مستقیم به کانفیگ بدون هیچ واسطه‌ای",
+        "پینگ واقعی و پایدار روی سرویس‌های کلادفلر — بدون نویز و نوسان",
+        "اتو تست خودکار خاموش می‌شود وقتی برنامه بسته می‌شود",
+        "اتو تست به صورت مداوم کانفیگ اضافه می‌کند — بعد از اتمام لیست دوباره کانفیگ جدید می‌آورد",
+        "قطع فوری فیلترشکن با یک ضربه — دکمه قطع و وصل به درستی کار می‌کند",
+        "هوشمندسازی دکمه Paste from Clipboard — جستجو در تاریخچه کیبورد، تشخیص vless/vmess از فایل‌های بزرگ",
+        "افزودن handler های پایداری: ConnectionStabilityHandler، PingCacheHandler، MemoryGuardHandler، VpnLifecycleHandler",
+        "جلوگیری از پر شدن کش برنامه با پاکسازی خودکار",
+        "پینگ از روی اینترنت خودکاربر گرفته می‌شود نه از روی فیلترشکن",
+        "بهینه‌سازی سرعت اتصال — استفاده از تمام توان کانفیگ بدون delay",
+        "پایداری کامل در سوییچ بین صفحات، قطع و وصل، باز و بسته کردن برنامه"
       ]
     }
   ]
