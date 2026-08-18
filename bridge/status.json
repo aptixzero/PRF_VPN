@@ -1,7 +1,7 @@
 {
-  "updated_at": "2026-08-18T01:06:31Z",
+  "updated_at": "2026-08-18T01:11:20Z",
   "feeds_total": 30,
   "feeds_ok": 30,
-  "vless": 4000,
-  "vmess": 4000
+  "vless": 600,
+  "vmess": 600
 }

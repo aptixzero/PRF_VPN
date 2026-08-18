@@ -10,8 +10,20 @@ name: Config bridge
 # when they all resolve to the same blocked host.
 #
 # This workflow aggregates the feeds on GitHub's own runners (which are never
-# blocked) and republishes the result to this repository's GitHub Pages site.
-# That gives the app a SECOND, independent hostname on a different CDN.
+# blocked) and republishes the result on hostnames that are NOT
+# raw.githubusercontent.com, so the app has a second independent path to a
+# config list.
+#
+# It publishes to TWO places, and the reason is worth keeping:
+#
+#   1. The `bridge` release, served from release-assets.githubusercontent.com.
+#      This is the PRIMARY, because it works with no repository setting turned
+#      on — the moment this workflow runs, the URLs are live.
+#   2. The repo's GitHub Pages site. Pages is NOT enabled on this repository
+#      today, so those URLs 404; the app lists them second and treats the 404
+#      as a normal dead source. Enabling Pages (Settings -> Pages -> Source:
+#      main, folder /) upgrades the app from one bridge host to two, with no
+#      app update needed.
 #
 # It is not a third-party intermediary: it is this account's own repository and
 # own Pages domain, so the "no intermediaries" rule in AI_AGENT_GUIDE.md §5e is
@@ -59,3 +71,21 @@ jobs:
           fi
           git commit -m "chore(bridge): refresh aggregated configs"
           git push
+
+      # The release assets are what the app actually reads first, so they are
+      # refreshed on EVERY run — including runs where the committed files did
+      # not change, because the previous step exits early on "no change" and
+      # must not be allowed to leave a stale asset behind.
+      - name: Refresh bridge release assets
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -e
+          gh release view bridge --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 || \
+            gh release create bridge --repo "$GITHUB_REPOSITORY" \
+              --title "Config bridge (rolling)" \
+              --notes "Rolling snapshot of aggregated configs, refreshed every 3 hours by .github/workflows/bridge.yml."
+          gh release upload bridge \
+            bridge/vless.txt bridge/vmess.txt bridge/status.json \
+            --repo "$GITHUB_REPOSITORY" --clobber
