@@ -99,14 +99,18 @@ jobs:
       - name: Publish bridge to gh-pages
         run: |
           set -e
-          git config user.name  "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           rm -rf /tmp/pages && mkdir -p /tmp/pages/bridge
           cp bridge/vless.txt bridge/vmess.txt bridge/status.json /tmp/pages/bridge/
           # .nojekyll: without it Pages runs Jekyll, which can drop files.
           touch /tmp/pages/.nojekyll
           cd /tmp/pages
           git init -q -b gh-pages
+          # Set the identity AFTER git init and inside this fresh repo. A
+          # `git config` run in the checkout directory does not apply here,
+          # because this is a brand new repository - that is what made the
+          # first attempt fail with "empty ident name".
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git remote add origin "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${GITHUB_REPOSITORY}.git"
           git add -A
           git commit -q -m "bridge snapshot $(date -u +%FT%TZ)"
