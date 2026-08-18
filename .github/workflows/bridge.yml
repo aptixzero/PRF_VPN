@@ -19,11 +19,13 @@ name: Config bridge
 #   1. The `bridge` release, served from release-assets.githubusercontent.com.
 #      This is the PRIMARY, because it works with no repository setting turned
 #      on — the moment this workflow runs, the URLs are live.
-#   2. The repo's GitHub Pages site. Pages is NOT enabled on this repository
-#      today, so those URLs 404; the app lists them second and treats the 404
-#      as a normal dead source. Enabling Pages (Settings -> Pages -> Source:
-#      main, folder /) upgrades the app from one bridge host to two, with no
-#      app update needed.
+#   2. The `gh-pages` branch, served from aptixzero.github.io. Pages is NOT
+#      enabled on this repository today, so those URLs 404; the app lists them
+#      second and treats the 404 as a normal dead source. Enabling Pages
+#      (Settings -> Pages -> Source: branch `gh-pages`, folder /) upgrades the
+#      app from one bridge host to two, with no app update needed.
+#
+# Neither destination touches `main`. See the publish steps for why.
 #
 # It is not a third-party intermediary: it is this account's own repository and
 # own Pages domain, so the "no intermediaries" rule in AI_AGENT_GUIDE.md §5e is
@@ -59,25 +61,20 @@ jobs:
       - name: Aggregate feeds
         run: python3 bridge/aggregate.py
 
-      - name: Publish if changed
-        run: |
-          set -e
-          git config user.name  "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add bridge/vless.txt bridge/vmess.txt bridge/status.json
-          if git diff --cached --quiet; then
-            echo "no change"
-            exit 0
-          fi
-          git commit -m "chore(bridge): refresh aggregated configs"
-          git push
-
-      # The release assets are what the app actually reads first, so they are
-      # refreshed on EVERY run — including runs where the committed files did
-      # not change, because the previous step exits early on "no change" and
-      # must not be allowed to leave a stale asset behind.
-      - name: Refresh bridge release assets
-        if: always()
+      # The aggregated lists are DATA, not source, and they are republished
+      # every 3 hours. Committing them back to the repository added a
+      # "chore(bridge): refresh aggregated configs" commit to main on every
+      # run, which buried the actual release history under bot noise and grew
+      # the repository without bound — in a repository whose stated purpose is
+      # "intentionally limited to public runtime artifacts".
+      #
+      # So the workflow no longer writes to the git tree at all. It publishes
+      # ONLY to the `bridge` release, which is exactly where the app reads
+      # from, and which can be overwritten in place forever at no cost to the
+      # history. That also means this workflow needs no write access to
+      # contents beyond the release itself, and can never conflict with branch
+      # protection on main.
+      - name: Publish bridge release assets
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -89,3 +86,28 @@ jobs:
           gh release upload bridge \
             bridge/vless.txt bridge/vmess.txt bridge/status.json \
             --repo "$GITHUB_REPOSITORY" --clobber
+
+      # Second host, same files. This targets the orphan `gh-pages` branch
+      # rather than main, for the same reason as above: the snapshot is data
+      # that changes every 3 hours and must not accumulate in the release
+      # history. The branch is force-pushed as a single orphan commit, so it
+      # never grows either.
+      #
+      # This step is harmless while Pages is disabled — it just maintains a
+      # branch nobody serves yet. The day Pages is switched on for `gh-pages`,
+      # the app's secondary bridge URLs start resolving with no app update.
+      - name: Publish bridge to gh-pages
+        run: |
+          set -e
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          rm -rf /tmp/pages && mkdir -p /tmp/pages/bridge
+          cp bridge/vless.txt bridge/vmess.txt bridge/status.json /tmp/pages/bridge/
+          # .nojekyll: without it Pages runs Jekyll, which can drop files.
+          touch /tmp/pages/.nojekyll
+          cd /tmp/pages
+          git init -q -b gh-pages
+          git remote add origin "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${GITHUB_REPOSITORY}.git"
+          git add -A
+          git commit -q -m "bridge snapshot $(date -u +%FT%TZ)"
+          git push -q --force origin gh-pages
