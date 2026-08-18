@@ -25,7 +25,22 @@ import urllib.request
 
 UA = "ProfessorVPN-bridge/1.0 (+https://github.com/aptixzero/my_prFF_vP_N)"
 TIMEOUT = 25
-MAX_PER_KIND = 4000
+
+# Deliberately far below what the feeds actually yield (~4000 per kind).
+#
+# The bridge is the FIRST source the app fetches, and DirectHttp gives every
+# fetch a 7 s call timeout. At 4000 links vmess.txt was ~1.5 MB, which is a
+# comfortable download on a good link and a guaranteed timeout on the throttled
+# Iranian mobile link this whole bridge exists to serve — the source that is
+# supposed to be the reliable one would have been the one most likely to time
+# out. The app only keeps ConfigSources.TARGET_COUNT (80) configs and
+# SourceFetcher caps its link cache at 96, so everything past a few hundred was
+# bytes the app downloads and then discards.
+#
+# 600 per kind keeps each file around 100-250 KB: still ~7x more than the app
+# can use, so the sample stays wide, but small enough to land inside the call
+# timeout on a bad link. Raising this back to thousands re-creates the timeout.
+MAX_PER_KIND = 600
 
 FEEDS = [
     "https://raw.githubusercontent.com/Epodonios/v2ray-configs/main/Splitted-By-Protocol/vless.txt",

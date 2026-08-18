@@ -18,7 +18,7 @@ The Android source, build pipeline, signing material, and admin-console source a
 `ProfessorVPN-v7.4-universal.apk`
 
 ```text
-SHA-256  4b6a716453302ea31f04140f4d7a92838c9218d60006dfcc1280c4c2af89347d
+SHA-256  d033732034af06fb74709c55cb3b5d8fe22d35c8395735eba4faaba0e777c2ce
 ```
 
 Security reports should be sent privately to the repository owner rather than opened as public issues.
