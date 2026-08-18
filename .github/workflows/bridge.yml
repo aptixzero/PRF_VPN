@@ -1,0 +1,61 @@
+name: Config bridge
+
+# ─────────────────────────────────────────────────────────────────────────────
+# WHY THIS EXISTS
+#
+# Every config feed the app reads lives on raw.githubusercontent.com. That is a
+# single hostname, and it is the one most aggressively DNS-poisoned on Iranian
+# ISPs — so when it is blocked, the app has no source of configs at all, no
+# matter how many feed URLs are in the list. Adding more feeds does not help
+# when they all resolve to the same blocked host.
+#
+# This workflow aggregates the feeds on GitHub's own runners (which are never
+# blocked) and republishes the result to this repository's GitHub Pages site.
+# That gives the app a SECOND, independent hostname on a different CDN.
+#
+# It is not a third-party intermediary: it is this account's own repository and
+# own Pages domain, so the "no intermediaries" rule in AI_AGENT_GUIDE.md §5e is
+# respected — no external relay, no CORS proxy, no mirror service ever sees a
+# user request. The bridge is refreshed on a schedule, so a user request hits a
+# static file and nothing is proxied live.
+# ─────────────────────────────────────────────────────────────────────────────
+
+on:
+  schedule:
+    # Every 3 hours. Feeds rotate dead nodes out fairly quickly, and this keeps
+    # the published snapshot fresh without hammering the upstream repositories.
+    - cron: '0 */3 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: config-bridge
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Aggregate feeds
+        run: python3 bridge/aggregate.py
+
+      - name: Publish if changed
+        run: |
+          set -e
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add bridge/vless.txt bridge/vmess.txt bridge/status.json
+          if git diff --cached --quiet; then
+            echo "no change"
+            exit 0
+          fi
+          git commit -m "chore(bridge): refresh aggregated configs"
+          git push
