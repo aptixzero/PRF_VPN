@@ -1,10 +1,10 @@
 {
-  "version": 21,
+  "version": 22,
   "updated_at": "2026-08-19T00:00:00Z",
   "app": {
     "name": "Professor VPN",
-    "latest_version": "7.7",
-    "latest_version_code": 58,
+    "latest_version": "7.8",
+    "latest_version_code": 59,
     "contact": {
       "title": "پشتیبانی",
       "text": "جهت ثبت تبلیغات و استعلام قیمت بنر به آیدی زیر در تلگرام پیام دهید:",
