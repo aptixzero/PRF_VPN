@@ -1,10 +1,10 @@
 {
-  "version": 19,
+  "version": 20,
   "updated_at": "2026-08-19T00:00:00Z",
   "app": {
     "name": "Professor VPN",
-    "latest_version": "7.5",
-    "latest_version_code": 56,
+    "latest_version": "7.6",
+    "latest_version_code": 57,
     "contact": {
       "title": "پشتیبانی",
       "text": "جهت ثبت تبلیغات و استعلام قیمت بنر به آیدی زیر در تلگرام پیام دهید:",
@@ -13,6 +13,24 @@
     }
   },
   "downloads": [
+    {
+      "id": "dl_760",
+      "version": "7.6",
+      "url": "https://github.com/aptixzero/my_prFF_vP_N/releases/download/v7.6/ProfessorVPN-v7.6-universal.apk",
+      "mirror_url": "https://github.com/aptixzero/my_prFF_vP_N/releases/latest/download/ProfessorVPN-v7.6-universal.apk",
+      "size": "58 MB",
+      "notes": "v7.6 — Terminal/CMD UI, English-only, stability improvements",
+      "date": "2026-08-20T00:00:00Z",
+      "changelog": [
+        "Terminal/CMD aesthetic: pure black + terminal green",
+        "Terminal boot splash: types This is Professor VPN",
+        "Scrollable terminal log on connect page with ASCII art",
+        "English only — Persian removed, never translates on any phone",
+        "Stability: less aggressive watchdog, fewer disconnect/reconnect cycles",
+        "Notification no longer shows ping (static Connected)",
+        "Light theme: clean white with green accents"
+      ]
+    },
     {
       "id": "dl_750",
       "version": "7.5",
