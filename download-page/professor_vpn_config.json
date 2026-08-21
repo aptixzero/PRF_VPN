@@ -1,10 +1,10 @@
 {
-  "version": 26,
-  "updated_at": "2026-08-19T00:00:00Z",
+  "version": 27,
+  "updated_at": "2026-08-21T16:50:00Z",
   "app": {
     "name": "Professor VPN",
-    "latest_version": "8.2",
-    "latest_version_code": 63,
+    "latest_version": "8.3",
+    "latest_version_code": 64,
     "contact": {
       "title": "پشتیبانی",
       "text": "جهت ثبت تبلیغات و استعلام قیمت بنر به آیدی زیر در تلگرام پیام دهید:",
@@ -13,6 +13,24 @@
     }
   },
   "downloads": [
+    {
+      "id": "dl_830",
+      "version": "8.3",
+      "url": "https://github.com/aptixzero/my_prFF_vP_N/releases/download/v8.3/ProfessorVPN-v8.3-universal.apk",
+      "mirror_url": "https://github.com/aptixzero/my_prFF_vP_N/releases/latest/download/ProfessorVPN-v8.3-universal.apk",
+      "size": "58 MB",
+      "notes": "v8.3 — measured adaptive network optimization, faster working-config discovery and UI stabilization",
+      "date": "2026-08-21T16:50:00Z",
+      "changelog": [
+        "Real UDP/DoH DNS measurement with System/Direct fallback",
+        "Automatic DNS, IP mode and shaping persisted and visible in Network Settings",
+        "TCP triage before real Xray ping",
+        "Deterministic source compatibility scoring and source reuse",
+        "Ping and VPN connection use the same DNS profile",
+        "One deep-test owner prevents duplicate native-core sweeps",
+        "Theme-aware controls and readable banner contrast"
+      ]
+    },
     {
       "id": "dl_760",
       "version": "7.6",
