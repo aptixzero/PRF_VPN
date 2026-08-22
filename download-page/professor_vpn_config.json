@@ -1,10 +1,10 @@
 {
-  "version": 28,
-  "updated_at": "2026-08-22T07:45:00Z",
+  "version": 29,
+  "updated_at": "2026-08-22T13:05:00Z",
   "app": {
     "name": "Professor VPN",
-    "latest_version": "8.4",
-    "latest_version_code": 65,
+    "latest_version": "8.5",
+    "latest_version_code": 66,
     "contact": {
       "title": "پشتیبانی",
       "text": "جهت ثبت تبلیغات و استعلام قیمت بنر به آیدی زیر در تلگرام پیام دهید:",
@@ -13,6 +13,31 @@
     }
   },
   "downloads": [
+    {
+      "id": "dl_850",
+      "version": "8.5",
+      "url": "https://github.com/aptixzero/my_prFF_vP_N/releases/download/v8.5/ProfessorVPN-v8.5-universal.apk",
+      "mirror_url": "https://github.com/aptixzero/my_prFF_vP_N/releases/latest/download/ProfessorVPN-v8.5-universal.apk",
+      "size": "58 MB",
+      "sha256": "ac95c0bf2ca3507a1fe96ae725d3171215544a2588613dfb581bdecd672ed2fd",
+      "notes": "v8.5 — a working config lands in My Configs the instant it is proven, a much faster first result, and a rebuilt terminal interface",
+      "date": "2026-08-22T13:05:00Z",
+      "changelog": [
+        "A config that passes the ping test is saved to My Configs immediately — even while the app is in the background or you are on another screen",
+        "My Configs no longer stays empty until a whole sweep finishes; in v8.4 nothing was saved until the entire batch completed",
+        "Much faster first result: the per-config ping budget is now a real ceiling instead of being exceeded by the pre-check",
+        "The most promising configs are probed first, so a usable config usually appears in the first seconds",
+        "My Configs is capped at the 200 best-ping automatically found configs; configs you pasted yourself are never removed, and neither is the one you have selected",
+        "Rebuilt terminal-style interface: bundled monospace face, a real terminal window with a title bar, and a consistent spacing grid",
+        "Taller home banner",
+        "The status line now reports the connection STATE instead of repeating the button's text in red",
+        "Light theme: the clock, battery and navigation icons are no longer white-on-white",
+        "Network settings measured per network: the DNS decision, IPv6-only detection and Happy Eyeballs tuning now come from real measurements on your link",
+        "A network change (Wi-Fi to mobile, or a new Wi-Fi) now triggers a fresh measurement instead of reusing settings measured elsewhere",
+        "Fixed a bug where the measured DNS, MSS clamp and IP mode were silently discarded when reconnecting after a network handover",
+        "New Shield route in AUTO for links with multi-layer interference"
+      ]
+    },
     {
       "id": "dl_840",
       "version": "8.4",
