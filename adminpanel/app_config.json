@@ -1,6 +1,6 @@
 {
-  "version": 39,
-  "latestApkVersion": "8.3",
+  "version": 40,
+  "latestApkVersion": "8.4",
   "appLogo": {
     "url": ""
   },
@@ -69,8 +69,8 @@
     "id": "",
     "color": "#8a3ffc"
   },
-  "ts": 1784976834455,
-  "lastUpdatedAt": 1784976834455,
+  "ts": 1787384748474,
+  "lastUpdatedAt": 1787384748474,
   "inAppTelegram": {
     "url": "https://t.me/Professor_ch"
   },

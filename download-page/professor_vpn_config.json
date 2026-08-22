@@ -1,10 +1,10 @@
 {
-  "version": 27,
-  "updated_at": "2026-08-21T16:50:00Z",
+  "version": 28,
+  "updated_at": "2026-08-22T07:45:00Z",
   "app": {
     "name": "Professor VPN",
-    "latest_version": "8.3",
-    "latest_version_code": 64,
+    "latest_version": "8.4",
+    "latest_version_code": 65,
     "contact": {
       "title": "پشتیبانی",
       "text": "جهت ثبت تبلیغات و استعلام قیمت بنر به آیدی زیر در تلگرام پیام دهید:",
@@ -13,6 +13,29 @@
     }
   },
   "downloads": [
+    {
+      "id": "dl_840",
+      "version": "8.4",
+      "url": "https://github.com/aptixzero/my_prFF_vP_N/releases/download/v8.4/ProfessorVPN-v8.4-universal.apk",
+      "mirror_url": "https://github.com/aptixzero/my_prFF_vP_N/releases/latest/download/ProfessorVPN-v8.4-universal.apk",
+      "size": "58 MB",
+      "sha256": "19c02dd9054f2e91b4c727f7fb3be84c7e4fa88109576f9e29094466ac727a53",
+      "notes": "v8.4 — measured network engine, 10 connection modes, durable auto-search, faster working-config discovery",
+      "date": "2026-08-22T07:45:00Z",
+      "changelog": [
+        "10 connection modes: Auto, Master, King, Turbo, Gaming, Stream, Stealth, Ghost, Lite, Shield",
+        "Fragmentation is now decided by a real DPI probe instead of assuming mobile links are filtered",
+        "New verified socket options: multipath TCP for Wi-Fi/mobile handover, receive-window clamp for lossy links",
+        "Per-mode keep-alive, buffers, idle window, UDP suppression and tunnel timeouts",
+        "Measured packet loss, jitter and per-port latency now drive config ranking",
+        "Iranian DNS resolvers joined the automatic resolver race",
+        "Auto-search survives minimise, app-swipe, screen-off, process kill and reboot — it stops only on STOP",
+        "Faster path to working configs: reachable-port prefilter and a wide cheap probe wave before the expensive one",
+        "Automatic settings no longer overwrite your manual picks in Network Settings",
+        "Connection test page shows the live analysis and the mode it chose",
+        "New crash guards, and tab switching hardened against crashes"
+      ]
+    },
     {
       "id": "dl_830",
       "version": "8.3",
