@@ -8,8 +8,8 @@ APK, always the binary for the current `versionName` in `app/build.gradle.kts`.
 - ABIs bundled in the single APK: `arm64-v8a`, `armeabi-v7a`, `x86_64`, `x86`
   (Android 7.0+ / `minSdk 24`) — a genuinely universal build, so one file
   installs on every common Android device.
-- APK SHA-256: `ff14a82062f144ab3e4af634f6d028e1484dfae5d74758dbf4599a2aa3e75790`
-- Size: 60,054,446 bytes
+- APK SHA-256: `aaaf9277a267eb396b3dde1f3966c937a5aff6489c634be894b733334b82e4e0`
+- Size: 60,054,250 bytes
 - Signed with the same release key used since v6.7
   (certificate SHA-256 `6a5ed5e32014ee77b41ca9ef9c71c5ab3397156d25fe22c7f1d52bb8907eb82d`,
   SHA-1 `df7d72072d0593cd2ed4554c95f283266eaec569`, DN `C=US, O=NeonVPN, CN=NeonVPN`),

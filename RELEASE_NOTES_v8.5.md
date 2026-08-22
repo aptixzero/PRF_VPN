@@ -9,8 +9,8 @@ key as v6.7 onwards (certificate SHA-256 `6a5ed5e3…07eb82d`, SHA-1
 `df7d7207…ec569`, verified with `apksigner verify --print-certs` against the
 shipped v8.4 APK), so v8.5 installs **over** an existing install.
 
-APK SHA-256 `ff14a82062f144ab3e4af634f6d028e1484dfae5d74758dbf4599a2aa3e75790`,
-60,054,446 bytes.
+APK SHA-256 `aaaf9277a267eb396b3dde1f3966c937a5aff6489c634be894b733334b82e4e0`,
+60,054,250 bytes.
 
 v8.5 is a **bug-fix and interface** release. v8.4 shipped a strong network
 engine, but two defects made the auto-search feel broken: a config that had been
