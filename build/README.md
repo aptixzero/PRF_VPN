@@ -1,49 +1,50 @@
 # Build output
 
-The signed **universal** release APK for Professor VPN is produced by the
-GitHub Actions workflow `.github/workflows/build.yml` on every push to
-`main` / `genspark_ai_developer`, and on manual dispatch.
+The signed **universal** release APK for Professor VPN lives here — exactly one
+APK, always the binary for the current `versionName` in `app/build.gradle.kts`.
 
 - Output name: `ProfessorVPN-v<versionName>-universal.apk`
-  (current: `ProfessorVPN-v7-universal.apk`, `versionCode 51`)
+  (current: `ProfessorVPN-v8.4-universal.apk`, `versionCode 65`)
 - ABIs bundled in the single APK: `arm64-v8a`, `armeabi-v7a`, `x86_64`, `x86`
-  (Android 7.0+ / minSdk 24)
-- APK SHA-256: `7a90e39c9b8dd155965fbd941da213a19eefe5ec10a87f7625d61856288a9e3a`
-  (byte-identical to the asset published on Release v7)
-- Signed with the same release key as v6.7 / v6.8 / v6.9
-  (SHA-256 `6a5ed5e3…07eb82d`), so v7 installs **over** an existing
-  Professor VPN without uninstalling first.
-- Download the **v7** APK from the
-  [Releases page](https://github.com/aptixzero/my_prFF_vP_N/releases/tag/v7)
-  (refreshed automatically on every push to `main` and on manual dispatch),
-  or from the workflow run's **Artifacts**.
+  (Android 7.0+ / `minSdk 24`) — a genuinely universal build, so one file
+  installs on every common Android device.
+- APK SHA-256: `19c02dd9054f2e91b4c727f7fb3be84c7e4fa88109576f9e29094466ac727a53`
+- Signed with the same release key used since v6.7
+  (certificate SHA-256 `6a5ed5e32014ee77b41ca9ef9c71c5ab3397156d25fe22c7f1d52bb8907eb82d`),
+  verified byte-for-byte identical to the key on the v8.3 APK — so v8.4 installs
+  **over** an existing Professor VPN without uninstalling first.
+- `zipalign -c 4` verified; APK Signature Scheme v2 verified with `apksigner`.
 
 ## Only one APK lives here
 
-This folder holds exactly one APK — the release binary for the current
-`versionName` in `app/build.gradle.kts`. When a new version ships, the previous
-APK is deleted in the same commit, so this folder can never offer a stale
-download.
+When a new version ships, `build/*.apk` is cleared in the same commit before the
+fresh APK is copied in, so this folder can never offer a stale download. The
+previous `ProfessorVPN-v8.3-universal.apk` was removed in favour of v8.4.
 
-The previous `ProfessorVPN-v6.9-universal.apk` was removed in favour of v7.
+## How it is built
 
-## What changed in v7
+`./gradlew :app:assembleRelease` with JDK 17 and `compileSdk`/`targetSdk` 34.
 
-See [`RELEASE_NOTES_v7.md`](../RELEASE_NOTES_v7.md) for the full write-up.
-v7 requires a real Xray tunnel and payload transfer for every visible ping,
-processes configs in ordered bounded groups, isolates My/Free ping state, keeps
-Auto Test moving across consecutive 240-config batches, and reports exit country
-from the active tunnel with a bundled Lion-and-Sun image for Iran.
+Signing secrets are read from the `KEYSTORE_PASSWORD` / `KEY_ALIAS` /
+`KEY_PASSWORD` environment variables when present, falling back to the bundled
+dev key so the source contains no hardcoded secret while still preserving the
+same release identity.
 
-| Fix | How |
+## What changed in v8.4
+
+See [`RELEASE_NOTES_v8.4.md`](../RELEASE_NOTES_v8.4.md) for the full write-up.
+
+v8.4 makes the network tuning **measured rather than assumed**, adds ten named
+connection modes, makes the auto-search survive being backgrounded/swiped/killed,
+and reaches working configs faster by spending the cheap probe budget first.
+
+| Change | How |
 |---|---|
-| **Visible ping proves a usable VPN** | TCP is reject-only. A visible result requires a real Xray Cloudflare measurement and a fresh connection that transfers a real response body. |
-| **Ordered, bounded sweeps** | My Configs, Free Configs, and Auto Test process stable windows of about ten in exact list order; successful rows pin immediately while untouched rows keep their order. |
-| **Independent tabs** | My and Free use separate result stores, sweep jobs, progress, cancellation, hydration, and persistence. Auto Test cannot reset My Configs. |
-| **Continuous Auto Test** | Phase one finds usable VLESS and VMESS sources; phase two installs and tests 240 configs, advances persistent cursors and monotonic names, then automatically continues with the next batch. |
-| **Stable exit identity** | IP and country are read from Cloudflare trace through the active tunnel and guarded by session generation. Iran uses the bundled historical Lion-and-Sun PNG. |
-| **Zero intermediaries** | Runtime network requests use direct origins, `Proxy.NO_PROXY`, Cloudflare DoH, and Cloudflare-only probes—no forwarding proxy, CDN mirror, Google probe, or third-party geo API. |
-
-The APK passed CI compilation, ZIP integrity, four-ABI inspection, zip alignment,
-APK Signature Scheme v2 verification, package/version inspection, and signing-key
-continuity checks.
+| **Ten connection modes** | `Auto/Master/King/Turbo/Gaming/Stream/Stealth/Ghost/Lite/Shield`, each a preset bundle over primitives the bundled core is **already verified to have** (guide §9a/§9d). No new Xray wire key is invented — that was the v7.3 failure mode. |
+| **Shaping is measured, not guessed** | `DpiProbe` writes a real TLS ClientHello unsplit and split-across-writes; fragmentation is enabled only when the split one demonstrably succeeds where the unsplit one fails. Reality/XTLS-Vision still forced `CLEAN`. |
+| **Ping path == connect path, structurally** | Both take the same immutable `TransportPlan`, so a new tuning knob cannot apply to only one of them. |
+| **New verified keys** | `tcpMptcp` (survives Wi-Fi↔mobile handover), `tcpWindowClamp` (bounds the in-flight buffer on a lossy link), per-mode keep-alive/user-timeout, and §9d freedom padding noise behind a runtime capability probe. |
+| **Automatic settings stop fighting the settings page** | Automatic decisions moved to a `net_auto_*` namespace; manual picks became sticky per-control overrides, so both "it is automatic" and "the page is editable" are true. |
+| **Faster working-config discovery** | Port prefilter using measured reachable ports, a 64-wide cheap TCP wave across the whole batch, then the expensive native-core wave ordered by measured evidence. |
+| **Durable auto-search** | Swiping the app away no longer stops the sweep; `START_STICKY` resume, self-restart, a `BootReceiver` re-arm and an unbounded offline wait keep it going. Only the user's STOP ends it — and the notification now carries a STOP action. |
+| **Crash handling** | `UiCrashGuard` adds call-site, fragment-lifecycle and activity-phase guards; tab switching fixed at source with `commitAllowingStateLoss` + an `isStateSaved` guard. |
