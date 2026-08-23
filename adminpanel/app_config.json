@@ -1,5 +1,5 @@
 {
-  "version": 43,
+  "version": 44,
   "latestApkVersion": "8.6",
   "appLogo": {
     "url": ""
@@ -16,7 +16,7 @@
     "subtitle": "",
     "bgColor": "#11161C",
     "textColor": "#000000",
-    "imageUrl": "https://raw.githubusercontent.com/aptixzero/my_prFF_vP_N/main/adminpanel/media/banner_1787482711069.png?v=1787482730417",
+    "imageUrl": "https://raw.githubusercontent.com/aptixzero/my_prFF_vP_N/main/adminpanel/media/banner_1787482927449.png?v=1787482930695",
     "action": "url",
     "actionUrl": "https://t.me/Professor_ch"
   },
@@ -28,7 +28,7 @@
   },
   "homeBanner": {
     "enabled": true,
-    "imageUrl": "https://raw.githubusercontent.com/aptixzero/my_prFF_vP_N/main/adminpanel/media/banner_1787482711069.png?v=1787482730417",
+    "imageUrl": "https://raw.githubusercontent.com/aptixzero/my_prFF_vP_N/main/adminpanel/media/banner_1787482927449.png?v=1787482930695",
     "text": "",
     "textColor": "#000000",
     "url": "https://t.me/Professor_ch"
@@ -37,7 +37,29 @@
     "enabled": true,
     "heading": "از پروژه حمایت کنید",
     "note": "حمایت شما سرورها را پایدار و پرسرعت نگه می‌دارد",
-    "items": []
+    "items": [
+      {
+        "id": "usdt",
+        "coin": "USDT (TRC20)",
+        "address": "TQqMKjwi3sxE53kbsvDvoC98KCTn1MVX7X",
+        "logoUrl": "",
+        "network": "usdt"
+      },
+      {
+        "id": "trx",
+        "coin": "TRON (TRC20)",
+        "address": "TQqMKjwi3sxE53kbsvDvoC98KCTn1MVX7X",
+        "logoUrl": "",
+        "network": "trx"
+      },
+      {
+        "id": "ton",
+        "coin": "TON",
+        "address": "UQCT9g2PrxcqOGtuZHaN1czoujTH0OWRp6zpjyo2HfqnZ_JF",
+        "logoUrl": "",
+        "network": "ton"
+      }
+    ]
   },
   "downloadLinks": {
     "enabled": true,
@@ -64,8 +86,8 @@
     "url": "https://professorvpn.vercel.app/",
     "caption": "این بارکد را با دوربین گوشی اسکن کنید"
   },
-  "ts": 1787482730563,
-  "lastUpdatedAt": 1787482730563,
+  "ts": 1787482930768,
+  "lastUpdatedAt": 1787482930768,
   "inAppTelegram": {
     "url": "https://t.me/Professor_ch"
   },
@@ -75,7 +97,7 @@
     "subtitle": "",
     "bgColor": "#11161C",
     "textColor": "#000000",
-    "imageUrl": "https://raw.githubusercontent.com/aptixzero/my_prFF_vP_N/main/adminpanel/media/banner_1787482711069.png?v=1787482730417",
+    "imageUrl": "https://raw.githubusercontent.com/aptixzero/my_prFF_vP_N/main/adminpanel/media/banner_1787482927449.png?v=1787482930695",
     "action": "url",
     "actionUrl": "https://t.me/Professor_ch"
   },
