@@ -2,15 +2,15 @@
    Professor VPN — Download Page loader
    - Reads the download manifest (professor_vpn_config.json) for
      the current version + the APK link.
-   - Reads the admin-panel app_config.json (same file the Android
-     app uses) so the WEBSITE banner, website logo and contact info
-     stay in sync — LIVE, with cache-busting.
+   - Reads app_config.json (same file the Android app uses) so the
+     WEBSITE banner, website logo and contact info stay in sync —
+     LIVE, with cache-busting.
 
    The website banner + website logo are read from `websiteBanner`
    and `websiteLogo`, which are completely INDEPENDENT from the
    in-app banner (`appBanner`) and the in-app logo (`appLogo`).
-   No ad-network scripts anywhere — the banner is a plain,
-   panel-controlled placeholder.
+   No ad-network scripts anywhere — the banner is a plain
+   remotely-controlled placeholder.
    ============================================================ */
 
 var DL_URL = "professor_vpn_config.json";
