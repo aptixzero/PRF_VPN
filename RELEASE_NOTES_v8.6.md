@@ -8,8 +8,8 @@ Signed with the same release key as v6.7 onwards (certificate SHA-256
 `df7d72072d0593cd2ed4554c95f283266eaec569`), so v8.6 installs **over** an
 existing install.
 
-APK SHA-256 `f50821af46673329dc6264a9e0682f39b197118fbc5910904c41ff8dc173eee8`,
-60,054,402 bytes.
+APK SHA-256 `f8da60f3779b93d6443440220995c3e5ba2092952a2adf0b5007823780531b0b`,
+60,054,374 bytes.
 
 v8.6 is a **bug-fix** release. The tunnel engine and the three-stage ping
 pipeline stay. What changes is that disconnect actually tears the session
@@ -29,6 +29,9 @@ button stays on screen.
   back after a stop.
 - If a connect generation is superseded mid-setup, the half-built TUN /
   xray / tun2socks session is torn down instead of left running.
+- A failed start (for example no TUN) now drops the foreground
+  notification after `pendingConnects` is released, instead of leaving
+  "Connecting…" stuck.
 
 ## 2. Connected means the device path works
 
