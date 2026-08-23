@@ -1,10 +1,10 @@
 {
-  "version": 29,
-  "updated_at": "2026-08-22T13:05:00Z",
+  "version": 30,
+  "updated_at": "2026-08-23T06:21:00Z",
   "app": {
     "name": "Professor VPN",
-    "latest_version": "8.5",
-    "latest_version_code": 66,
+    "latest_version": "8.6",
+    "latest_version_code": 67,
     "contact": {
       "title": "پشتیبانی",
       "text": "جهت ثبت تبلیغات و استعلام قیمت بنر به آیدی زیر در تلگرام پیام دهید:",
@@ -13,6 +13,24 @@
     }
   },
   "downloads": [
+    {
+      "id": "dl_860",
+      "version": "8.6",
+      "url": "https://github.com/aptixzero/my_prFF_vP_N/releases/download/v8.6/ProfessorVPN-v8.6-universal.apk",
+      "mirror_url": "https://github.com/aptixzero/my_prFF_vP_N/releases/latest/download/ProfessorVPN-v8.6-universal.apk",
+      "size": "58 MB",
+      "sha256": "f50821af46673329dc6264a9e0682f39b197118fbc5910904c41ff8dc173eee8",
+      "notes": "v8.6 — disconnect actually stops the tunnel, ping requires proven payload, and the home connect button stays on screen",
+      "date": "2026-08-23T06:21:00Z",
+      "changelog": [
+        "Disconnect now tears the VPN session down and cancels the notification",
+        "A sticky restart after stop can no longer bring the tunnel back by itself",
+        "Connected is only shown after a live device-path check, not a core-only delay",
+        "A ping is not shown if the throughput probe failed",
+        "The home log no longer grows under the connect button",
+        "Exit-IP summaries are printed once per IP/country, not on every resume"
+      ]
+    },
     {
       "id": "dl_850",
       "version": "8.5",

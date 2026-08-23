@@ -226,12 +226,6 @@ inconsistency guide §5c exists to prevent.
 - Dead code removed: `FreeConfigsFragment.startSearch()` / `onAutoTestClicked()`
   and an unreachable toast. `Progress.autoStopped` was deleted rather than wired
   up, because §5i means no correct implementation can ever set it true.
-- The private `adminpanel/` copy was a v4.6-generation fork with a **weaker auth
-  model**: SHA-256 `USER_HASH`/`PASS_HASH` digests checked in the browser, a
-  GitHub token persisted in `localStorage`, and user-editable repo/path/token
-  fields defaulting to the dead `aptixzero/PRF_VPN` repository. It is now the
-  authoritative `prf-vpn-admin` console, which delegates auth to GitHub, keeps
-  the token in memory only, and locks the publish target in source.
 - Documentation corrected against the code: the README's APK filename and feed
   count (222 feeds — 138 VLESS + 84 VMESS, parsed from `LiveSources.kt`), and
   `AI_AGENT_GUIDE`'s repository slug and remote-config URL.
