@@ -16,7 +16,7 @@
     "subtitle": "",
     "bgColor": "#11161C",
     "textColor": "#000000",
-    "imageUrl": "https://raw.githubusercontent.com/aptixzero/my_prFF_vP_N/main/adminpanel/media/banner_1787482927449.png?v=1787482930695",
+    "imageUrl": "https://raw.githubusercontent.com/aptixzero/my_prFF_vP_N/main/adminpanel/media/banner_1787482997711.png?v=1787482999843",
     "action": "url",
     "actionUrl": "https://t.me/Professor_ch"
   },
@@ -28,7 +28,7 @@
   },
   "homeBanner": {
     "enabled": true,
-    "imageUrl": "https://raw.githubusercontent.com/aptixzero/my_prFF_vP_N/main/adminpanel/media/banner_1787482927449.png?v=1787482930695",
+    "imageUrl": "https://raw.githubusercontent.com/aptixzero/my_prFF_vP_N/main/adminpanel/media/banner_1787482997711.png?v=1787482999843",
     "text": "",
     "textColor": "#000000",
     "url": "https://t.me/Professor_ch"
@@ -86,8 +86,8 @@
     "url": "https://professorvpn.vercel.app/",
     "caption": "این بارکد را با دوربین گوشی اسکن کنید"
   },
-  "ts": 1787482930768,
-  "lastUpdatedAt": 1787482930768,
+  "ts": 1787482999917,
+  "lastUpdatedAt": 1787482999917,
   "inAppTelegram": {
     "url": "https://t.me/Professor_ch"
   },
@@ -97,7 +97,7 @@
     "subtitle": "",
     "bgColor": "#11161C",
     "textColor": "#000000",
-    "imageUrl": "https://raw.githubusercontent.com/aptixzero/my_prFF_vP_N/main/adminpanel/media/banner_1787482927449.png?v=1787482930695",
+    "imageUrl": "https://raw.githubusercontent.com/aptixzero/my_prFF_vP_N/main/adminpanel/media/banner_1787482997711.png?v=1787482999843",
     "action": "url",
     "actionUrl": "https://t.me/Professor_ch"
   },
