@@ -1,10 +1,10 @@
 {
-  "version": 30,
-  "updated_at": "2026-08-23T06:21:00Z",
+  "version": 31,
+  "updated_at": "2026-08-27T20:00:00Z",
   "app": {
     "name": "Professor VPN",
-    "latest_version": "8.6",
-    "latest_version_code": 67,
+    "latest_version": "8.7",
+    "latest_version_code": 68,
     "contact": {
       "title": "پشتیبانی",
       "text": "جهت ثبت تبلیغات و استعلام قیمت بنر به آیدی زیر در تلگرام پیام دهید:",
@@ -13,6 +13,26 @@
     }
   },
   "downloads": [
+    {
+      "id": "dl_870",
+      "version": "8.7",
+      "url": "https://github.com/aptixzero/my_prFF_vP_N/releases/download/v8.7/ProfessorVPN-v8.7-universal.apk",
+      "mirror_url": "https://github.com/aptixzero/my_prFF_vP_N/releases/latest/download/ProfessorVPN-v8.7-universal.apk",
+      "size": "58 MB",
+      "sha256": "b1874c668380d846f6444ac51051f560575e1fa696846c80eec912a3e9250ec8",
+      "notes": "v8.7 — measurement truth: one real probe engine, database-backed lists at any size, per-network strategy, crash-proof upgrade",
+      "date": "2026-08-27T20:00:00Z",
+      "changelog": [
+        "My Configs and Free lists now load through the database with paging — instant at any list size",
+        "One measurement engine for lists, auto-test and the connect button: a shown ping is a real, reproducible tunnel measurement",
+        "A single failed re-test no longer erases a working config (3 failures in 10 minutes before one is declared dead)",
+        "Upgrading with a huge config list no longer crashes — the import is chunked, resumable and backed up",
+        "The engine fingerprints your network (measured, never operator names) and learns which method works on it",
+        "Overnight auto-test survives process death (WorkManager supervisor) and advances cleanly through consumed sources",
+        "Network Settings rebuilt: 11 categorized screens incl. full DNS lab, diagnostics, strategy profiles, export/import",
+        "Per-ABI APK splits on the release page for smaller downloads"
+      ]
+    },
     {
       "id": "dl_860",
       "version": "8.6",

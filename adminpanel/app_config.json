@@ -1,6 +1,6 @@
 {
-  "version": 44,
-  "latestApkVersion": "8.6",
+  "version": 45,
+  "latestApkVersion": "8.7",
   "appLogo": {
     "url": ""
   },
@@ -87,7 +87,7 @@
     "caption": "این بارکد را با دوربین گوشی اسکن کنید"
   },
   "ts": 1787482999917,
-  "lastUpdatedAt": 1787482999917,
+  "lastUpdatedAt": 1787841600000,
   "inAppTelegram": {
     "url": "https://t.me/Professor_ch"
   },
