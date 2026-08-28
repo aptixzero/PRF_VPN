@@ -4,17 +4,17 @@ The signed **universal** release APK for Professor VPN lives here — exactly on
 APK, always the binary for the current `versionName` in `app/build.gradle.kts`.
 
 - Output name: `ProfessorVPN-v<versionName>-universal.apk`
-  (current: `ProfessorVPN-v8.6-universal.apk`, `versionCode 67`)
+  (current: `ProfessorVPN-v8.8-universal.apk`, `versionCode 69`)
 - ABIs bundled in the single APK: `arm64-v8a`, `armeabi-v7a`, `x86_64`, `x86`
   (Android 7.0+ / `minSdk 24`) — a genuinely universal build, so one file
   installs on every common Android device.
-- APK SHA-256: `f8da60f3779b93d6443440220995c3e5ba2092952a2adf0b5007823780531b0b`
-- Size: 60,054,374 bytes
+- APK SHA-256: `e67a006b48636e2d1cff5c80901f238d9c16f36225f62a0433661d14595e860a`
+- Size: 60,444,290 bytes
 - Signed with the same release key used since v6.7
   (certificate SHA-256 `6a5ed5e32014ee77b41ca9ef9c71c5ab3397156d25fe22c7f1d52bb8907eb82d`,
   SHA-1 `df7d72072d0593cd2ed4554c95f283266eaec569`, DN `C=US, O=NeonVPN, CN=NeonVPN`),
-  verified with `apksigner verify --print-certs` against the shipped v8.5 APK — so
-  v8.6 installs **over** an existing Professor VPN without uninstalling first.
+  verified with `apksigner verify --print-certs` against the shipped v8.7 APK — so
+  v8.8 installs **over** an existing Professor VPN without uninstalling first.
 - `zipalign -c 4` verified; APK Signature Scheme v2 verified with `apksigner`.
 
 ## Only one APK lives here

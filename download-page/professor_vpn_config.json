@@ -1,10 +1,10 @@
 {
-  "version": 31,
-  "updated_at": "2026-08-27T20:00:00Z",
+  "version": 32,
+  "updated_at": "2026-08-28T12:00:00Z",
   "app": {
     "name": "Professor VPN",
-    "latest_version": "8.7",
-    "latest_version_code": 68,
+    "latest_version": "8.8",
+    "latest_version_code": 69,
     "contact": {
       "title": "پشتیبانی",
       "text": "جهت ثبت تبلیغات و استعلام قیمت بنر به آیدی زیر در تلگرام پیام دهید:",
@@ -13,6 +13,28 @@
     }
   },
   "downloads": [
+    {
+      "id": "dl_880",
+      "version": "8.8",
+      "url": "https://github.com/aptixzero/my_prFF_vP_N/releases/download/v8.8/ProfessorVPN-v8.8-universal.apk",
+      "mirror_url": "https://github.com/aptixzero/my_prFF_vP_N/releases/latest/download/ProfessorVPN-v8.8-universal.apk",
+      "size": "58 MB",
+      "sha256": "e67a006b48636e2d1cff5c80901f238d9c16f36225f62a0433661d14595e860a",
+      "notes": "v8.8 — servers are always numbered (never real names, even on copy), WiFi/fixed-line fixed, faster discovery, no infrastructure identity in the app",
+      "date": "2026-08-28T12:00:00Z",
+      "changelog": [
+        "Server names are never shown or copied — every config is numbered (Server 1, 2, …) the moment it enters the app, from one counter that never resets",
+        "Existing lists upgrade automatically: a one-time background migration renames everything already stored",
+        "WiFi / fixed-line internet fixed: no more TCP Fast Open on WiFi auto modes (fixed-line equipment silently dropped it and every handshake died)",
+        "Every WiFi network now gets its own measured profile instead of replaying another network's settings for 12 hours",
+        "The strategy the engine learns per network now genuinely shapes probing and connecting (it was a dead setting before)",
+        "Faster discovery: the adaptive probe controller now actually adapts, probes no longer time out while still waiting in queue, and failed configs cool down 30 minutes instead of being retried every cycle",
+        "The app contains no readable reference to its own distribution infrastructure",
+        "Home banner art now fills the banner exactly and renders at full sharpness",
+        "New ANR watchdog and safe-mode boot on top of the existing crash guards",
+        "One universal APK for every Android device (7.0+)"
+      ]
+    },
     {
       "id": "dl_870",
       "version": "8.7",
