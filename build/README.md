@@ -4,11 +4,11 @@ The signed **universal** release APK for Professor VPN lives here — exactly on
 APK, always the binary for the current `versionName` in `app/build.gradle.kts`.
 
 - Output name: `ProfessorVPN-v<versionName>-universal.apk`
-  (current: `ProfessorVPN-v8.9-universal.apk`, `versionCode 70`)
+  (current: `ProfessorVPN-v9.0-universal.apk`, `versionCode 71`)
 - ABIs bundled in the single APK: `arm64-v8a`, `armeabi-v7a`, `x86_64`, `x86`
   (Android 7.0+ / `minSdk 24`) — a genuinely universal build, so one file
   installs on every common Android device.
-- APK SHA-256: `02ca1b67867b2a9687ed47455430e92983569a4b1ccae722c9de136d01b886ab`
+- APK SHA-256: `b5227e372b4d568c8d2c0d8fdeab63af6a8767d24c7e1d74f894e46773ad0b02`
 - Size: 60,448,718 bytes
 - Signed with the same release key used since v6.7
   (certificate SHA-256 `6a5ed5e32014ee77b41ca9ef9c71c5ab3397156d25fe22c7f1d52bb8907eb82d`,
@@ -32,11 +32,11 @@ Signing secrets are read from the `KEYSTORE_PASSWORD` / `KEY_ALIAS` /
 dev key so the source contains no hardcoded secret while still preserving the
 same release identity.
 
-## What changed in v8.9
+## What changed in v9.0
 
-See [`RELEASE_NOTES_v8.9.md`](../RELEASE_NOTES_v8.9.md) for the full write-up.
+See [`RELEASE_NOTES_v9.0.md`](../RELEASE_NOTES_v9.0.md) for the full write-up.
 
-v8.9 is the stability release: the week-one degradation is fixed at the root
+v9.0 is the STOP & Truth release: STOP really stops everything, the disconnect button always obeys, and green configs are always visible
 (bounded ledgers, corpus, orphan rows, releasable pressure latch, periodic
 housekeeping), manual pings are always fresh real measurements, the list keeps
 its order while sweeping, verified connections auto-failover to the best
