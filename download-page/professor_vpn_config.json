@@ -1,10 +1,10 @@
 {
-  "version": 32,
-  "updated_at": "2026-08-28T12:00:00Z",
+  "version": 33,
+  "updated_at": "2026-08-29T13:00:00Z",
   "app": {
     "name": "Professor VPN",
-    "latest_version": "8.8",
-    "latest_version_code": 69,
+    "latest_version": "8.9",
+    "latest_version_code": 70,
     "contact": {
       "title": "پشتیبانی",
       "text": "جهت ثبت تبلیغات و استعلام قیمت بنر به آیدی زیر در تلگرام پیام دهید:",
@@ -13,6 +13,30 @@
     }
   },
   "downloads": [
+    {
+      "id": "dl_890",
+      "version": "8.9",
+      "url": "https://github.com/aptixzero/my_prFF_vP_N/releases/download/v8.9/ProfessorVPN-v8.9-universal.apk",
+      "mirror_url": "https://github.com/aptixzero/my_prFF_vP_N/releases/latest/download/ProfessorVPN-v8.9-universal.apk",
+      "size": "58 MB",
+      "sha256": "02ca1b67867b2a9687ed47455430e92983569a4b1ccae722c9de136d01b886ab",
+      "notes": "v8.9 — never degrades, never lies, never drops: week-one slowdown fixed at the root, every ping is fresh and real, verified connections heal themselves",
+      "date": "2026-08-29T13:00:00Z",
+      "changelog": [
+        "The week-one slowdown is fixed: diagnostics ledgers, the discovery corpus, orphaned measurement rows and the probe-cap pressure latch are all bounded and released now — the app works the same in week six as in the first hour",
+        "Every manual ping is a FRESH real measurement: no more cached values, no more sweep starting mid-list, pings survive closing and reopening the app",
+        "The list keeps its order while pinging — rows test in place, then sort once at the end (no more jumping)",
+        "A config that pings green in Free is saved to My Configs immediately — no need to leave the tab",
+        "Home now always shows the config you picked in Free/My Configs the moment you return",
+        "A verified connection heals itself: if the server dies completely, the app switches to the best measured alternative and reconnects through the full proof gate",
+        "WiFi roaming and cell handover no longer stall the tunnel (same-type network changes revive it too)",
+        "Healthier links now automatically use the streaming-tuned profile (big buffers, long idle) — feeds and video start faster",
+        "DNS inside the tunnel has a fallback resolver — one flaky resolver no longer stalls page loads",
+        "Port catalogue expanded to 24 ports; the Ports and Fragmentation settings now genuinely affect the engine",
+        "Home banner shows the whole image at a proper height; light theme is fully legible (no more invisible button text)",
+        "One universal APK for every Android device (7.0+)"
+      ]
+    },
     {
       "id": "dl_880",
       "version": "8.8",
@@ -96,130 +120,6 @@
         "A network change (Wi-Fi to mobile, or a new Wi-Fi) now triggers a fresh measurement instead of reusing settings measured elsewhere",
         "Fixed a bug where the measured DNS, MSS clamp and IP mode were silently discarded when reconnecting after a network handover",
         "New Shield route in AUTO for links with multi-layer interference"
-      ]
-    },
-    {
-      "id": "dl_840",
-      "version": "8.4",
-      "url": "https://github.com/aptixzero/my_prFF_vP_N/releases/download/v8.4/ProfessorVPN-v8.4-universal.apk",
-      "mirror_url": "https://github.com/aptixzero/my_prFF_vP_N/releases/latest/download/ProfessorVPN-v8.4-universal.apk",
-      "size": "58 MB",
-      "sha256": "19c02dd9054f2e91b4c727f7fb3be84c7e4fa88109576f9e29094466ac727a53",
-      "notes": "v8.4 — measured network engine, 10 connection modes, durable auto-search, faster working-config discovery",
-      "date": "2026-08-22T07:45:00Z",
-      "changelog": [
-        "10 connection modes: Auto, Master, King, Turbo, Gaming, Stream, Stealth, Ghost, Lite, Shield",
-        "Fragmentation is now decided by a real DPI probe instead of assuming mobile links are filtered",
-        "New verified socket options: multipath TCP for Wi-Fi/mobile handover, receive-window clamp for lossy links",
-        "Per-mode keep-alive, buffers, idle window, UDP suppression and tunnel timeouts",
-        "Measured packet loss, jitter and per-port latency now drive config ranking",
-        "Iranian DNS resolvers joined the automatic resolver race",
-        "Auto-search survives minimise, app-swipe, screen-off, process kill and reboot — it stops only on STOP",
-        "Faster path to working configs: reachable-port prefilter and a wide cheap probe wave before the expensive one",
-        "Automatic settings no longer overwrite your manual picks in Network Settings",
-        "Connection test page shows the live analysis and the mode it chose",
-        "New crash guards, and tab switching hardened against crashes"
-      ]
-    },
-    {
-      "id": "dl_830",
-      "version": "8.3",
-      "url": "https://github.com/aptixzero/my_prFF_vP_N/releases/download/v8.3/ProfessorVPN-v8.3-universal.apk",
-      "mirror_url": "https://github.com/aptixzero/my_prFF_vP_N/releases/latest/download/ProfessorVPN-v8.3-universal.apk",
-      "size": "58 MB",
-      "notes": "v8.3 — measured adaptive network optimization, faster working-config discovery and UI stabilization",
-      "date": "2026-08-21T16:50:00Z",
-      "changelog": [
-        "Real UDP/DoH DNS measurement with System/Direct fallback",
-        "Automatic DNS, IP mode and shaping persisted and visible in Network Settings",
-        "TCP triage before real Xray ping",
-        "Deterministic source compatibility scoring and source reuse",
-        "Ping and VPN connection use the same DNS profile",
-        "One deep-test owner prevents duplicate native-core sweeps",
-        "Theme-aware controls and readable banner contrast"
-      ]
-    },
-    {
-      "id": "dl_760",
-      "version": "7.6",
-      "url": "https://github.com/aptixzero/my_prFF_vP_N/releases/download/v7.6/ProfessorVPN-v7.6-universal.apk",
-      "mirror_url": "https://github.com/aptixzero/my_prFF_vP_N/releases/latest/download/ProfessorVPN-v7.6-universal.apk",
-      "size": "58 MB",
-      "notes": "v7.6 — Terminal/CMD UI, English-only, stability improvements",
-      "date": "2026-08-20T00:00:00Z",
-      "changelog": [
-        "Terminal/CMD aesthetic: pure black + terminal green",
-        "Terminal boot splash: types This is Professor VPN",
-        "Scrollable terminal log on connect page with ASCII art",
-        "English only — Persian removed, never translates on any phone",
-        "Stability: less aggressive watchdog, fewer disconnect/reconnect cycles",
-        "Notification no longer shows ping (static Connected)",
-        "Light theme: clean white with green accents"
-      ]
-    },
-    {
-      "id": "dl_750",
-      "version": "7.5",
-      "url": "https://github.com/aptixzero/my_prFF_vP_N/releases/download/v7.5/ProfessorVPN-v7.5-universal.apk",
-      "mirror_url": "https://github.com/aptixzero/my_prFF_vP_N/releases/latest/download/ProfessorVPN-v7.5-universal.apk",
-      "size": "58 MB",
-      "notes": "نسخه ۷.۵ — آپدیت بزرگ: تنظیمات دسته‌بندی‌شده، کاتالوگ DNS با پینگ واقعی، تنظیمات حرفه‌ای شبکه، ۴۳ منبع جدید",
-      "date": "2026-08-19T00:00:00Z",
-      "changelog": [
-        "تنظیمات به سه صفحهٔ جدا تقسیم شد: ظاهر، زبان، شبکه",
-        "کاتالوگ DNS دسته‌بندی‌شده: ایرانی، بین‌المللی، گیمینگ",
-        "دکمهٔ پینگ همهٔ DNSها — پینگ واقعی هر DNS روی اینترنت خود کاربر",
-        "انتخاب خودکار سریع‌ترین DNS بعد از پینگ",
-        "تنظیمات شبکه حرفه‌ای: Mux (مولتی‌پلکس)، TCP Fast Open، حذف نویز",
-        "حالت خودکار و دستی در صفحهٔ تنظیمات شبکه — نه در صفحهٔ اتصال",
-        "۴۳ منبع جدید و زنده به لیست منابع اضافه شد (مجموعاً ۱۱۳ منبع)",
-        "حالت خودکار قوی‌تر — مسابقهٔ ۸ کاندید DNS به‌صورت موازی",
-        "هماهنگ‌سازی کامل مسیر پینگ و اتصال — تنظیمات یکسان در هر دو مسیر",
-        "رنگ‌بندی پینگ: سبز < ۱۵۰ms، نارنجی < ۴۰۰ms، قرمز ≥ ۴۰۰ms"
-      ]
-    },
-    {
-      "id": "dl_740",
-      "version": "7.4",
-      "url": "https://github.com/aptixzero/my_prFF_vP_N/releases/download/v7.4/ProfessorVPN-v7.4-universal.apk",
-      "mirror_url": "https://github.com/aptixzero/my_prFF_vP_N/releases/latest/download/ProfessorVPN-v7.4-universal.apk",
-      "size": "58 MB",
-      "notes": "نسخه ۷.۴ — رفع ریشه‌ای نویز و قطع‌ووصل شدن، تنظیمات حرفه‌ای شبکه (DNS / پروکسی / IP)، حالت خودکار و دستی، نویزگیری و پل اختصاصی دریافت کانفیگ",
-      "date": "2026-08-18T00:00:00Z",
-      "changelog": [
-        "رفع ریشه‌ای ناپایداری — پنج تنظیمی که هستهٔ برنامه اصلاً نمی‌شناخت حذف/اصلاح شد",
-        "دیگر پینگ از ۱۰۰ به ۱۰۰۰۰ نمی‌پرد — عدد نمایشی میانهٔ پنجرهٔ متحرک است نه میانگین",
-        "رفع قطع‌ووصل شدن روی کانفیگ‌های Reality و Vision — دیگر روی آن‌ها fragment اعمال نمی‌شود",
-        "بخش تنظیمات حرفه‌ای: DNS (معمولی و DoH)، حالت IP، شکل‌دهی ترافیک و نویزگیری",
-        "حالت خودکار (پیش‌فرض) و حالت دستی — در حالت دستی هیچ تنظیمی خودکار ست نمی‌شود",
-        "شناسایی خودکار شبکه: مسابقهٔ DNS، تست واقعی IPv6، پورت‌های باز و MTU لینک",
-        "نویزگیری: مسدودسازی QUIC که روی تونل باعث فریز شدن ویدیو و اینستاگرام می‌شد",
-        "پینگ با همان تنظیماتی گرفته می‌شود که موقع اتصال استفاده می‌شود — نه شانسی",
-        "BBR واقعاً فعال شد — در نسخه‌های قبل به‌خاطر غلط املایی کلید هرگز اعمال نمی‌شد",
-        "پل اختصاصی دریافت کانفیگ روی دامنهٔ خود پروژه — رفع «کانفیگ پیدا نمی‌شود»",
-        "هماهنگ‌سازی MTU تونل — رفع تکه‌تکه شدن و از دست رفتن بسته‌ها"
-      ]
-    },
-    {
-      "id": "dl_730",
-      "version": "7.3",
-      "url": "https://github.com/aptixzero/my_prFF_vP_N/releases/download/v7.3/ProfessorVPN-v7.3-universal.apk",
-      "mirror_url": "https://github.com/aptixzero/my_prFF_vP_N/releases/latest/download/ProfessorVPN-v7.3-universal.apk",
-      "size": "57 MB",
-      "notes": "نسخه ۷.۳ — اتو تست همیشه‌روشن حتی با صفحه خاموش، رفع کامل مشکل «وصل می‌شود ولی باز نمی‌شود»، قطع فوری با یک ضربه، پینگ واقعی و پایدار",
-      "date": "2026-08-16T00:00:00Z",
-      "changelog": [
-        "اتو تست با صفحه خاموش هم ادامه می‌دهد — سرویس foreground با wake lock",
-        "با بستن کامل برنامه (swipe از recents) اتو تست خودکار خاموش می‌شود",
-        "رفع مشکل «وصل می‌شود ولی هیچ سایتی باز نمی‌شود» — اصلاح DNS تونل",
-        "حذف کامل واسط‌های DNS و پروکسی — اتصال مستقیم بدون هیچ واسطه‌ای",
-        "رفع باگ دکمه قطع — قطع فوری فیلترشکن با یک ضربه، همیشه",
-        "پینگ واقعی روی سرویس‌های کلادفلر — بدون نویز و نوسان، مطابق اندازه‌گیری خارجی",
-        "پینگ هنگام اتصال VPN از اینترنت خود کاربر گرفته می‌شود",
-        "۲۴۰ کانفیگ در هر دور اتو تست — بعد از اتمام لیست دوباره کانفیگ جدید می‌آورد",
-        "جلوگیری از پر شدن کش — پاکسازی خودکار کش پینگ",
-        "سرعت و پایداری کامل برای گیم، ویدیو، اینستاگرام و دانلود سنگین",
-        "Paste from Clipboard هوشمند — استخراج vless/vmess حتی از فایل‌های بزرگ"
       ]
     }
   ]
