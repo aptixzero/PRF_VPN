@@ -1,10 +1,10 @@
 {
-  "version": 34,
-  "updated_at": "2026-08-29T17:00:00Z",
+  "version": 35,
+  "updated_at": "2026-08-30T13:40:00Z",
   "app": {
     "name": "Professor VPN",
-    "latest_version": "9.0",
-    "latest_version_code": 71,
+    "latest_version": "9.1",
+    "latest_version_code": 72,
     "contact": {
       "title": "پشتیبانی",
       "text": "جهت ثبت تبلیغات و استعلام قیمت بنر به آیدی زیر در تلگرام پیام دهید:",
@@ -13,6 +13,26 @@
     }
   },
   "downloads": [
+    {
+      "id": "dl_910",
+      "version": "9.1",
+      "url": "https://github.com/aptixzero/my_prFF_vP_N/releases/download/v9.1/ProfessorVPN-v9.1-universal.apk",
+      "mirror_url": "https://github.com/aptixzero/my_prFF_vP_N/releases/latest/download/ProfessorVPN-v9.1-universal.apk",
+      "size": "58 MB",
+      "sha256": "345db07ad946d0b446fa3a36c6b94edebca5143785bde8664a74a9ca948f7c39",
+      "notes": "v9.1 — truthful ping: if a config shows a ping it connects; if it will not connect it shows no ping. Rock-solid tunnel.",
+      "date": "2026-08-30T13:40:00Z",
+      "changelog": [
+        "A ping is only shown when the config is connectable — no more unstable badge or fake numbers",
+        "PING ALL starts at row 1, clears old results first, and measures every row fresh",
+        "Ping results survive app restart (Room is the store of record)",
+        "Tapping a Free config selects it for Home without leaving the tab",
+        "My Configs numbering is 1, 2, 3 on screen; COPY never carries a feed name",
+        "STOP goes through one controller; SOCKS/API ports are forced free before every start",
+        "Light / Dark / System theme; home banner decodes at the view size",
+        "One universal APK for every Android device (7.0+), same signing key as v9.0"
+      ]
+    },
     {
       "id": "dl_900",
       "version": "9.0",
