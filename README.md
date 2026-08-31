@@ -2,7 +2,7 @@
 
 This repository is intentionally limited to public runtime artifacts.
 
-- Latest release: [Professor VPN v9.2](https://github.com/aptixzero/my_prFF_vP_N/releases/latest)
+- Latest release: [Professor VPN v9.3](https://github.com/aptixzero/my_prFF_vP_N/releases/latest)
 - Download page: <https://professorvpn.vercel.app/>
 - Android remote configuration: `adminpanel/app_config.json`
 - Config bridge: [`bridge/aggregate.py`](./bridge/aggregate.py) — run every 3 hours by
@@ -18,10 +18,10 @@ The Android source, build pipeline, and signing material are maintained in priva
 
 ## Integrity
 
-`ProfessorVPN-v9.2-universal.apk`
+`ProfessorVPN-v9.3-universal.apk`
 
 ```text
-SHA-256  967156c45b20c7a8067b675109ad2c0c46e2e5c4aed3a0c87f081fa4cbcd918b
+SHA-256  46347d31ebbb1c8d558cd42f4b3fc3334527f7944ae2a16a51f45a54108a322f
 ```
 
 Security reports should be sent privately to the repository owner rather than opened as public issues.
