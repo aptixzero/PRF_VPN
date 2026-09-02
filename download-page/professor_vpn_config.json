@@ -1,10 +1,10 @@
 {
-  "version": 38,
-  "updated_at": "2026-09-02T06:20:00Z",
+  "version": 39,
+  "updated_at": "2026-09-02T09:50:00Z",
   "app": {
     "name": "Professor VPN",
-    "latest_version": "9.4",
-    "latest_version_code": 75,
+    "latest_version": "9.5",
+    "latest_version_code": 76,
     "contact": {
       "title": "پشتیبانی",
       "text": "جهت ثبت تبلیغات و استعلام قیمت بنر به آیدی زیر در تلگرام پیام دهید:",
@@ -13,6 +13,22 @@
     }
   },
   "downloads": [
+    {
+      "id": "dl_950",
+      "version": "9.5",
+      "url": "https://github.com/aptixzero/my_prFF_vP_N/releases/download/v9.5/ProfessorVPN-v9.5-universal.apk",
+      "mirror_url": "https://github.com/aptixzero/my_prFF_vP_N/releases/latest/download/ProfessorVPN-v9.5-universal.apk",
+      "size": "58 MB",
+      "sha256": "63b432523644a5bede7b24ca29c6606a6113002a6a2796bb3a4d35c09b0b4dc4",
+      "notes": "v9.5 — connection-test page no longer freezes at 97%; search hands configs to the ping sweep",
+      "date": "2026-09-02T09:50:00Z",
+      "changelog": [
+        "Connection-test page no longer freezes at 97% after applying settings",
+        "Auto Test starts only after the first batch is collected, so configs get pinged, pinned, and saved to My Configs",
+        "A hung source fetch cannot trap the page — the sweep still starts",
+        "One universal APK, same signing key as v9.4"
+      ]
+    },
     {
       "id": "dl_940",
       "version": "9.4",
