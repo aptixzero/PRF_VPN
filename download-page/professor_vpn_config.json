@@ -1,10 +1,10 @@
 {
-  "version": 40,
-  "updated_at": "2026-09-02T10:55:00Z",
+  "version": 41,
+  "updated_at": "2026-09-02T11:40:00Z",
   "app": {
     "name": "Professor VPN",
-    "latest_version": "9.6",
-    "latest_version_code": 77,
+    "latest_version": "9.7",
+    "latest_version_code": 78,
     "contact": {
       "title": "پشتیبانی",
       "text": "جهت ثبت تبلیغات و استعلام قیمت بنر به آیدی زیر در تلگرام پیام دهید:",
@@ -13,6 +13,23 @@
     }
   },
   "downloads": [
+    {
+      "id": "dl_970",
+      "version": "9.7",
+      "url": "https://github.com/aptixzero/my_prFF_vP_N/releases/download/v9.7/ProfessorVPN-v9.7-universal.apk",
+      "mirror_url": "https://github.com/aptixzero/my_prFF_vP_N/releases/latest/download/ProfessorVPN-v9.7-universal.apk",
+      "size": "58 MB",
+      "sha256": "69cf971f8879e222daaf72da28bd60ea0ce11798b5a15aa6f609019c3441d6be",
+      "notes": "v9.7 — new configs are added and pinged; no duplicate pings; counter matches the real Server name",
+      "date": "2026-09-02T11:40:00Z",
+      "changelog": [
+        "Later search cycles no longer drop the configs they just collected",
+        "One ping per server identity and per address:port — no duplicate pings",
+        "Progress shows Checked n/N and the real Server remark, not a fake index",
+        "One fast retry so a real node is not left with no ping",
+        "One universal APK, same signing key as v9.6"
+      ]
+    },
     {
       "id": "dl_960",
       "version": "9.6",
