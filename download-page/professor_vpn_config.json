@@ -1,10 +1,10 @@
 {
-  "version": 37,
-  "updated_at": "2026-08-31T06:30:00Z",
+  "version": 38,
+  "updated_at": "2026-09-02T06:20:00Z",
   "app": {
     "name": "Professor VPN",
-    "latest_version": "9.3",
-    "latest_version_code": 74,
+    "latest_version": "9.4",
+    "latest_version_code": 75,
     "contact": {
       "title": "پشتیبانی",
       "text": "جهت ثبت تبلیغات و استعلام قیمت بنر به آیدی زیر در تلگرام پیام دهید:",
@@ -13,6 +13,26 @@
     }
   },
   "downloads": [
+    {
+      "id": "dl_940",
+      "version": "9.4",
+      "url": "https://github.com/aptixzero/my_prFF_vP_N/releases/download/v9.4/ProfessorVPN-v9.4-universal.apk",
+      "mirror_url": "https://github.com/aptixzero/my_prFF_vP_N/releases/latest/download/ProfessorVPN-v9.4-universal.apk",
+      "size": "58 MB",
+      "sha256": "513aa38bf7823b7c829496623673e6cc4927267e20d54d60818ed48986502cd5",
+      "notes": "v9.4 — pings survive minimize, a ping means it connects, disconnect is instant, Reset to default",
+      "date": "2026-09-02T06:20:00Z",
+      "changelog": [
+        "Pings survive minimize, tab switch and screen-off — sweeps no longer cancel in the background",
+        "A green ping is a real tunnel plus payload, so Connect on that config must work",
+        "Live ping stays still through jitter; connecting does not overwrite the list number",
+        "Disconnect drops the TUN immediately and no longer freezes on the Xray stop",
+        "Watchdog holds a working tunnel while bytes are still moving",
+        "Search keeps finding configs with the screen off; new batches merge so greens stay",
+        "Reset to default returns every network setting to automatic",
+        "One universal APK, same signing key as v9.3"
+      ]
+    },
     {
       "id": "dl_930",
       "version": "9.3",
